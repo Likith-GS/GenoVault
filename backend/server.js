@@ -17,6 +17,7 @@ const accessRoutes      = require("./routes/accessRoutes");
 const blockchainRoutes  = require("./routes/blockchainRoutes");
 const auditRoutes       = require("./routes/auditRoutes");
 const integrityRoutes   = require("./routes/integrityRoutes");
+const provenanceRoutes  = require("./routes/provenanceRoutes");  // Provenance & Misuse Detection
 
 
 // ─────────────────────────────────────────────────────────────
@@ -56,7 +57,13 @@ app.use(
     origin: process.env.CLIENT_ORIGIN || "http://localhost:8080",
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    exposedHeaders: ["Content-Disposition", "Content-Length", "X-Encrypted-At-Rest"],
+    exposedHeaders: [
+      "Content-Disposition",
+      "Content-Length",
+      "X-Encrypted-At-Rest",
+      "X-Watermark-Id",    // exposes watermarkId only — seed never exposed
+      "X-Download-Id",
+    ],
     credentials: true,
   })
 );
@@ -107,6 +114,18 @@ const mfaLimiter = rateLimit({
   },
 });
 
+// Scan limiter — 5 misuse scans per hour per IP (scans are expensive background jobs)
+const scanLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Scan rate limit exceeded. Maximum 5 scans per hour.",
+  },
+});
+
 // ── 4. Body parsers ───────────────────────────────────────────
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
@@ -125,7 +144,9 @@ app.use("/api/files",      dashboardLimiter);
 app.use("/api/access",     dashboardLimiter);
 app.use("/api/auth/login",      authLimiter);
 app.use("/api/auth/register",   authLimiter);
-app.use("/api/auth/verify-mfa", mfaLimiter); // Strict – brute-force guard
+app.use("/api/auth/verify-mfa", mfaLimiter);          // Strict – brute-force guard
+app.use("/api/provenance",      dashboardLimiter);     // Dashboard reads
+app.use("/api/provenance/scans", scanLimiter);         // 5 scans/hour/IP
 
 // ── 7. Routes ─────────────────────────────────────────────────
 app.use("/api/auth",       authRoutes);
@@ -135,6 +156,7 @@ app.use("/api/access",     accessRoutes);
 app.use("/api/blockchain", blockchainRoutes); // Ethereum integration
 app.use("/api/audit",      auditRoutes);      // Unified blockchain audit trail
 app.use("/api/integrity",  integrityRoutes);  // Unit 6 – file integrity & dashboard
+app.use("/api/provenance", provenanceRoutes); // Provenance & Misuse Detection Engine
 
 // Health check — live system status for the Vault Status widget
 app.get("/api/health", async (req, res) => {

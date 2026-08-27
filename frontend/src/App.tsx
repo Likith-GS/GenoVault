@@ -16,6 +16,9 @@ import Requests from "./pages/dashboard/Requests.tsx";
 import AccessControl from "./pages/dashboard/AccessControl.tsx";
 import Audit from "./pages/dashboard/Audit.tsx";
 import Verification from "./pages/dashboard/Verification.tsx";
+import Provenance from "./pages/dashboard/Provenance.tsx";
+import MisuseEvents from "./pages/dashboard/MisuseEvents.tsx";
+import MisuseIncident from "./pages/dashboard/MisuseIncident.tsx";
 
 import { ResearcherLayout } from "@/components/researcher/ResearcherLayout";
 import DashboardOverview from "./pages/researcher/DashboardOverview";
@@ -50,6 +53,9 @@ const App = () => (
                 <Route path="verification" element={<Verification />} />
                 <Route path="profile" element={<Profile />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="provenance" element={<Provenance />} />
+                <Route path="misuse" element={<MisuseEvents />} />
+                <Route path="misuse/:eventId" element={<MisuseIncident />} />
               </Route>
 
               <Route path="/researcher" element={<ResearcherLayout />}>

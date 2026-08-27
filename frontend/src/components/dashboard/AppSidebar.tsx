@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import {
   LayoutDashboard, UploadCloud, Inbox, ShieldCheck, ScrollText, FileSearch, LogOut,
+  Shield, ShieldAlert,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -20,6 +21,8 @@ const ownerItems = [
   { title: "Access Control",url: "/dashboard/access",       icon: ShieldCheck },
   { title: "Verification",  url: "/dashboard/verification", icon: FileSearch },
   { title: "Audit Trail",   url: "/dashboard/audit",        icon: ScrollText },
+  { title: "Provenance",    url: "/dashboard/provenance",   icon: Shield },
+  { title: "Misuse Events", url: "/dashboard/misuse",       icon: ShieldAlert },
 ];
 
 

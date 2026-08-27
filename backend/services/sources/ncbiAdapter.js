@@ -1,0 +1,309 @@
+/**
+ * ncbiAdapter.js
+ * ──────────────────────────────────────────────────────────────────
+ * Two-stage NCBI adapter for the Misuse Detection Engine.
+ *
+ * Stage A — Candidate Discovery (E-utilities):
+ *   esearch → returns SRA accession IDs matching dataset metadata
+ *   efetch runinfo → checks per-accession accessibility metadata
+ *   einfo → healthcheck and database status
+ *
+ * Stage B — Conditional Sequence Retrieval:
+ *   retrieveFASTQ() → retrieves quality-bearing FASTQ via supported
+ *   SRA data-access infrastructure.
+ *   Returns qualitiesAvailable=false when only FASTA is obtainable.
+ *
+ * CRITICAL: The caller MUST check qualitiesAvailable === true before
+ * passing the result to GENOMIC_LSB_V1 watermark detection.
+ * If qualitiesAvailable === false, record METADATA_MATCH_ONLY.
+ *
+ * V1 Scalability note: This adapter performs sequential requests.
+ * Parallelism and rate-limiting refinement are future enhancements.
+ */
+
+"use strict";
+
+const https  = require("https");
+const http   = require("http");
+const url    = require("url");
+
+// ── NCBI E-utilities base URL ────────────────────────────────────
+const EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
+
+// Rate limiting: NCBI allows 3 req/sec without API key, 10/sec with key
+const API_KEY    = process.env.NCBI_API_KEY || null;
+const TOOL_EMAIL = process.env.NCBI_TOOL_EMAIL || "genovault@example.com";
+const TOOL_NAME  = "GenoVault";
+const MAX_RESULTS = 20;
+
+// ─────────────────────────────────────────────────────────────────
+// Internal HTTP helper
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * httpGet(targetUrl, timeoutMs)
+ * Simple promise-based HTTP/HTTPS GET returning body as string.
+ */
+function httpGet(targetUrl, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const parsed  = new url.URL(targetUrl);
+    const adapter = parsed.protocol === "https:" ? https : http;
+
+    const req = adapter.get(targetUrl, { timeout: timeoutMs }, (res) => {
+      const chunks = [];
+      res.on("data",  (c) => chunks.push(c));
+      res.on("end",   () => resolve(Buffer.concat(chunks).toString("utf8")));
+      res.on("error", reject);
+    });
+    req.on("error",   reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error(`NCBI request timed out (${timeoutMs}ms): ${targetUrl}`));
+    });
+  });
+}
+
+/**
+ * buildEutilsUrl(endpoint, params)
+ * Adds standard tool/email/apikey parameters.
+ */
+function buildEutilsUrl(endpoint, params = {}) {
+  const p = new URLSearchParams({
+    tool:  TOOL_NAME,
+    email: TOOL_EMAIL,
+    retmode: "json",
+    ...(API_KEY ? { api_key: API_KEY } : {}),
+    ...params,
+  });
+  return `${EUTILS_BASE}/${endpoint}?${p.toString()}`;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage A — Candidate Discovery
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * search(datasetMetadata, maxResults)
+ *
+ * Stage A-1: Queries NCBI SRA via esearch using genomic dataset metadata.
+ * Returns a list of SRA accession IDs that are metadata-similar candidates.
+ *
+ * Query strategy: assembles an esearch term from available metadata fields
+ * (organism, genome build, library strategy/layout, phenotype, sequencing
+ * technology). More specific queries reduce false-positive candidates.
+ *
+ * @param {Object} datasetMetadata
+ *   Optional fields: { organism, genomeBuild, libraryStrategy,
+ *                      libraryLayout, phenotype, instrument, keywords[] }
+ * @param {number} maxResults
+ * @returns {Promise<string[]>}  SRA accession IDs (e.g. ["SRR123456", ...])
+ */
+async function search(datasetMetadata = {}, maxResults = MAX_RESULTS) {
+  const terms = [];
+
+  if (datasetMetadata.organism)        terms.push(`${datasetMetadata.organism}[Organism]`);
+  if (datasetMetadata.libraryStrategy) terms.push(`${datasetMetadata.libraryStrategy}[Strategy]`);
+  if (datasetMetadata.libraryLayout)   terms.push(`${datasetMetadata.libraryLayout}[Layout]`);
+  if (datasetMetadata.instrument)      terms.push(`${datasetMetadata.instrument}[Platform]`);
+  if (datasetMetadata.phenotype)       terms.push(`${datasetMetadata.phenotype}[All Fields]`);
+
+  if (datasetMetadata.keywords && datasetMetadata.keywords.length > 0) {
+    for (const kw of datasetMetadata.keywords) {
+      terms.push(`${kw}[All Fields]`);
+    }
+  }
+
+  if (terms.length === 0) {
+    // No metadata to search on — return empty
+    console.warn("[NCBIAdapter] search() called with no queryable metadata; returning empty");
+    return [];
+  }
+
+  const query    = terms.join(" AND ");
+  const searchUrl = buildEutilsUrl("esearch.fcgi", {
+    db:      "sra",
+    term:    query,
+    retmax:  maxResults,
+    retmode: "json",
+  });
+
+  console.log(`[NCBIAdapter] esearch query: ${query.slice(0, 120)}...`);
+
+  let body;
+  try {
+    body = await httpGet(searchUrl);
+  } catch (err) {
+    throw new Error(`NCBI esearch failed: ${err.message}`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("NCBI esearch returned invalid JSON");
+  }
+
+  const ids = parsed?.esearchresult?.idlist || [];
+  console.log(`[NCBIAdapter] esearch returned ${ids.length} candidate IDs`);
+  return ids;
+}
+
+/**
+ * getRunInfo(accessionId)
+ *
+ * Stage A-2: Fetches SRA run metadata for a specific accession to check:
+ *   - Whether the accession is publicly accessible
+ *   - What file formats are available
+ *   - Whether quality scores are likely present
+ *
+ * Returns parsed run info object or null on failure.
+ *
+ * @param {string} accessionId  – SRA run ID e.g. SRR123456
+ * @returns {Promise<Object|null>}
+ */
+async function getRunInfo(accessionId) {
+  const infoUrl = buildEutilsUrl("efetch.fcgi", {
+    db:      "sra",
+    id:      accessionId,
+    rettype: "runinfo",
+    retmode: "text",
+  });
+
+  try {
+    const body = await httpGet(infoUrl);
+    // runinfo is CSV; parse first data row
+    const lines = body.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return null;
+
+    const headers = lines[0].split(",");
+    const values  = lines[1].split(",");
+    const info    = {};
+    headers.forEach((h, i) => { info[h.trim()] = (values[i] || "").trim(); });
+    return info;
+  } catch (err) {
+    console.warn(`[NCBIAdapter] getRunInfo failed for ${accessionId}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * healthCheck()
+ * Pings NCBI einfo to verify E-utilities connectivity.
+ * Returns { ok: boolean, latencyMs: number, error?: string }
+ */
+async function healthCheck() {
+  const start = Date.now();
+  try {
+    const checkUrl = buildEutilsUrl("einfo.fcgi", { db: "sra" });
+    await httpGet(checkUrl, 5000);
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - start, error: err.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Stage B — Quality-Bearing FASTQ Retrieval
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * retrieveFASTQ(accessionId)
+ *
+ * Stage B: Attempts to retrieve quality-bearing FASTQ data for the given
+ * SRA accession ID via supported SRA data-access infrastructure.
+ *
+ * V1 implementation note:
+ *   NCBI E-utilities efetch cannot reliably return quality-bearing FASTQ
+ *   for SRA data. Full-quality FASTQ retrieval requires SRA Toolkit
+ *   (fastq-dump / fasterq-dump) or cloud-native SRA access (AWS/GCP).
+ *   If SRA Toolkit is not available in the runtime environment, this
+ *   function returns qualitiesAvailable=false, and the caller MUST record
+ *   the result as METADATA_MATCH_ONLY.
+ *
+ * Returns one of three shapes:
+ *   { buffer: Buffer, format: 'FASTQ', qualitiesAvailable: true }
+ *   { buffer: null, format: 'FASTA', qualitiesAvailable: false }
+ *   { buffer: null, format: null, qualitiesAvailable: false, error: string }
+ *
+ * @param {string} accessionId
+ * @returns {Promise<Object>}
+ */
+async function retrieveFASTQ(accessionId) {
+  // Check if SRA Toolkit is available in the environment
+  const sraToolkitAvailable = await _checkSraToolkitAvailable();
+
+  if (!sraToolkitAvailable) {
+    console.warn(
+      `[NCBIAdapter] SRA Toolkit not available — cannot retrieve quality-bearing FASTQ ` +
+      `for ${accessionId}. Recording as METADATA_MATCH_ONLY.`
+    );
+    return {
+      buffer:             null,
+      format:             null,
+      qualitiesAvailable: false,
+      error:              "SRA Toolkit not available in runtime environment",
+    };
+  }
+
+  // SRA Toolkit is available — attempt retrieval via fastq-dump / fasterq-dump
+  try {
+    const { execFile } = require("child_process");
+    const os           = require("os");
+    const path         = require("path");
+    const fs           = require("fs");
+
+    const tmpDir      = path.join(os.tmpdir(), `gv_ncbi_${Date.now()}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    const fastqBuffer = await new Promise((resolve, reject) => {
+      execFile(
+        "fasterq-dump",
+        ["--split-files", "--outdir", tmpDir, accessionId],
+        { timeout: 120000 },
+        (err) => {
+          if (err) { return reject(err); }
+
+          // Read first FASTQ output file
+          const files = fs.readdirSync(tmpDir).filter(f => f.endsWith(".fastq"));
+          if (files.length === 0) {
+            return reject(new Error("fasterq-dump produced no .fastq files"));
+          }
+          const buf = fs.readFileSync(path.join(tmpDir, files[0]));
+          resolve(buf);
+        }
+      );
+    });
+
+    // Clean up temp
+    try {
+      const { execSync } = require("child_process");
+      execSync(`${process.platform === "win32" ? "rmdir /s /q" : "rm -rf"} "${tmpDir}"`);
+    } catch { /* non-fatal */ }
+
+    return { buffer: fastqBuffer, format: "FASTQ", qualitiesAvailable: true };
+
+  } catch (err) {
+    console.warn(`[NCBIAdapter] FASTQ retrieval failed for ${accessionId}: ${err.message}`);
+    return {
+      buffer:             null,
+      format:             null,
+      qualitiesAvailable: false,
+      error:              err.message,
+    };
+  }
+}
+
+/**
+ * _checkSraToolkitAvailable()
+ * Internal: checks if fasterq-dump (SRA Toolkit) is on PATH.
+ */
+async function _checkSraToolkitAvailable() {
+  const { execFile } = require("child_process");
+  return new Promise((resolve) => {
+    execFile("fasterq-dump", ["--version"], { timeout: 3000 }, (err) => {
+      resolve(!err);
+    });
+  });
+}
+
+module.exports = { search, getRunInfo, healthCheck, retrieveFASTQ };
