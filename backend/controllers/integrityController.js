@@ -14,6 +14,24 @@
  *   4. Azure      – blob exists (verifyBlobExists)
  *   5. IPFS       – ipfsStatus === "done" && ipfsCid non-null
  *
+ * Each layer returns: { status, category, layer, reason?, timestamp }
+ *   status   — "PASS" | "FAIL" | "SKIP" | "PENDING"
+ *   category — one of 8 distinct categories (R3.4, see CATEGORIES below)
+ *   layer    — which layer produced this result
+ *
+ * Overall category is derived by EXPLICIT RULES (not "worst" layer):
+ *   1. Any INTEGRITY_VIOLATION       → overall = INTEGRITY_VIOLATION
+ *   2. Any KEY_OR_DECRYPTION_FAILURE → overall = KEY_OR_DECRYPTION_FAILURE
+ *   3. Any PRIMARY_STORAGE_UNAVAILABLE → overall = PRIMARY_STORAGE_UNAVAILABLE
+ *   4. Any BACKUP_UNAVAILABLE (IPFS failed) → overall = BACKUP_UNAVAILABLE
+ *   5. Any VERIFICATION_UNAVAILABLE  → overall = VERIFICATION_UNAVAILABLE
+ *   6. IPFS PENDING + all others PASS → overall = PENDING (not a failure)
+ *   7. All PASS/SKIP                 → overall = SECURE
+ *
+ * IMPORTANT: Per-layer results are always returned in full. The overall category
+ * is a summary convenience for dashboards. Multiple simultaneous failures are
+ * visible in the per-layer detail.
+ *
  * All SHA-256 checks use streaming (getReadableBlobStream) — zero full-file buffer.
  */
 
@@ -29,14 +47,75 @@ const {
 } = require("../services/blockchainService");
 
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Helper — streaming SHA-256 via getReadableBlobStream (no buffer)
-   Returns { status: "PASS"|"FAIL"|"SKIP", storedHash, liveHash, error? }
-─────────────────────────────────────────────────────────────────────────────*/
+// ─────────────────────────────────────────────────────────────────────────────
+// Integrity Category Constants (R3.4)
+// ─────────────────────────────────────────────────────────────────────────────
+const CATEGORIES = {
+  SECURE:                   "SECURE",
+  PENDING:                  "PENDING",
+  INTEGRITY_VIOLATION:      "INTEGRITY_VIOLATION",
+  VERIFICATION_UNAVAILABLE: "VERIFICATION_UNAVAILABLE",
+  PRIMARY_STORAGE_UNAVAILABLE: "PRIMARY_STORAGE_UNAVAILABLE",
+  BACKUP_UNAVAILABLE:       "BACKUP_UNAVAILABLE",
+  KEY_OR_DECRYPTION_FAILURE:"KEY_OR_DECRYPTION_FAILURE",
+  AUTHORIZATION_FAILURE:    "AUTHORIZATION_FAILURE",
+};
+
+/**
+ * deriveOverallCategory (R3.4)
+ * ───────────────────────────
+ * Derives the overall category from layer results using EXPLICIT priority
+ * rules. NOT derived by taking the "worst" category (which would recreate
+ * the AT_RISK collapse problem).
+ *
+ * Per-layer results are always returned in full alongside the overall.
+ * The overall is a summary convenience only.
+ *
+ * @param {object[]} layers  Array of layer result objects
+ * @returns {string}         One of the CATEGORIES constants
+ */
+const deriveOverallCategory = (layers) => {
+  const cats = layers.map(l => l.category).filter(Boolean);
+
+  // Rule 1: Any integrity violation → highest severity
+  if (cats.includes(CATEGORIES.INTEGRITY_VIOLATION))       return CATEGORIES.INTEGRITY_VIOLATION;
+  // Rule 2: Key or decryption failure
+  if (cats.includes(CATEGORIES.KEY_OR_DECRYPTION_FAILURE)) return CATEGORIES.KEY_OR_DECRYPTION_FAILURE;
+  // Rule 3: Primary storage unavailable
+  if (cats.includes(CATEGORIES.PRIMARY_STORAGE_UNAVAILABLE)) return CATEGORIES.PRIMARY_STORAGE_UNAVAILABLE;
+  // Rule 4: Backup (IPFS) failed (not pending — that is rule 6)
+  if (cats.includes(CATEGORIES.BACKUP_UNAVAILABLE))        return CATEGORIES.BACKUP_UNAVAILABLE;
+  // Rule 5: Blockchain unreachable
+  if (cats.includes(CATEGORIES.VERIFICATION_UNAVAILABLE))  return CATEGORIES.VERIFICATION_UNAVAILABLE;
+  // Rule 6: IPFS still pending but everything else PASS/SKIP → PENDING (not a failure)
+  if (cats.includes(CATEGORIES.PENDING))                   return CATEGORIES.PENDING;
+  // Rule 7: All PASS or SKIP
+  return CATEGORIES.SECURE;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Layer helpers — each returns { status, category, layer, reason?, timestamp }
+// ─────────────────────────────────────────────────────────────────────────────
+
 const checkSha256 = async (file) => {
+  const ts = new Date().toISOString();
+
+  // SHA-256 integrity check:
+  //   1. Stream the current Azure blob → compute live SHA-256
+  //   2. Compare against blockchainFileHash (registered on-chain at upload time)
+  // PASS  → blob unchanged since blockchain registration
+  // FAIL  → INTEGRITY_VIOLATION (file tampered or corrupted)
+  // SKIP  → blockchainFileHash not yet stored (background job still pending)
   if (!file.blockchainFileHash) {
-    return { status: "SKIP", note: "No blockchainFileHash stored (pre-Unit6 file)" };
+    return {
+      status:   "SKIP",
+      category: null,
+      layer:    "SHA256",
+      note:     "SHA-256 hash not yet stored — encryption background job may still be processing. Use retry-encryption if stuck.",
+      timestamp: ts,
+    };
   }
+
   try {
     const stream   = await getReadableBlobStream(file.azureBlobName);
     const hashCalc = crypto.createHash("sha256");
@@ -53,32 +132,47 @@ const checkSha256 = async (file) => {
 
     return {
       status:     match ? "PASS" : "FAIL",
-      storedHash,
-      liveHash,
-      ...(match ? {} : { reason: "SHA-256 mismatch — file may have been tampered" }),
+      category:   match ? CATEGORIES.SECURE : CATEGORIES.INTEGRITY_VIOLATION,
+      layer:      "SHA256",
+      storedHash,   // SHA-256 registered on blockchain at upload time
+      liveHash,     // SHA-256 of current Azure blob (live streaming read)
+      timestamp:  ts,
+      ...(match ? {} : { reason: "SHA-256 mismatch — current blob differs from blockchain-anchored hash" }),
     };
   } catch (err) {
-    return { status: "FAIL", error: err.message };
+    return {
+      status:    "FAIL",
+      category:  CATEGORIES.PRIMARY_STORAGE_UNAVAILABLE,
+      layer:     "SHA256",
+      reason:    "Azure blob could not be streamed for SHA-256 verification",
+      error:     err.message,
+      timestamp: ts,
+    };
   }
 };
+
+
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Helper — on-chain registration check
    Uses verifyFileHashOnChain() which is already exported from blockchainService.
 ─────────────────────────────────────────────────────────────────────────────*/
 const checkBlockchain = async (file) => {
+  const ts = new Date().toISOString();
   if (!isBlockchainConfigured() || !file.blockchainFileHash) {
-    return { status: "SKIP", note: "Blockchain not configured or no hash stored" };
+    return { status: "SKIP", category: null, layer: "BLOCKCHAIN", note: "Blockchain not configured or no hash stored", timestamp: ts };
   }
   try {
     const result = await verifyFileHashOnChain(file.blockchainFileHash);
 
     if (result.disabled) {
-      return { status: "SKIP", note: "Blockchain not configured" };
+      return { status: "SKIP", category: null, layer: "BLOCKCHAIN", note: "Blockchain not configured", timestamp: ts };
     }
 
     return {
       status:          result.verified ? "PASS" : "FAIL",
+      category:        result.verified ? CATEGORIES.SECURE : CATEGORIES.INTEGRITY_VIOLATION,
+      layer:           "BLOCKCHAIN",
       onChainFileId:   result.fileId        ?? file.blockchainFileId ?? null,
       txHash:          file.blockchainTxHash    ?? null,
       blockNumber:     file.blockchainBlockNum  ?? null,
@@ -89,10 +183,18 @@ const checkBlockchain = async (file) => {
       etherscanUrl:    file.blockchainTxHash
         ? `https://sepolia.etherscan.io/tx/${file.blockchainTxHash}`
         : null,
+      timestamp:       ts,
       ...(result.verified ? {} : { reason: result.error || "File hash not found in on-chain registry" }),
     };
   } catch (err) {
-    return { status: "FAIL", error: err.message };
+    return {
+      status:    "FAIL",
+      category:  CATEGORIES.VERIFICATION_UNAVAILABLE,
+      layer:     "BLOCKCHAIN",
+      reason:    "Blockchain RPC unreachable or timed out",
+      error:     err.message,
+      timestamp: ts,
+    };
   }
 };
 
@@ -102,45 +204,63 @@ const checkBlockchain = async (file) => {
    PASS = isEncrypted true + IV present + Key Vault has the key
 ─────────────────────────────────────────────────────────────────────────────*/
 const checkAes = async (file) => {
-  // We need the IV — fetch with +encryptionIv select if not already loaded
+  const ts = new Date().toISOString();
   if (!file.isEncrypted) {
-    return { status: "FAIL", reason: "File is not marked as encrypted" };
+    return { status: "FAIL", category: CATEGORIES.KEY_OR_DECRYPTION_FAILURE, layer: "AES", reason: "File is not marked as encrypted", timestamp: ts };
   }
 
-  // encryptionIv is select:false by default; check if it was fetched
   const hasIv = Boolean(file.encryptionIv);
 
-  // Try Key Vault lookup
   let keyOk = false;
   try {
     const key = await retrieveEncryptionKey(String(file._id));
-    keyOk = Boolean(key && key.length === 64); // 32-byte hex = 64 chars
+    keyOk = Boolean(key && key.length === 64);
   } catch {
     keyOk = false;
   }
 
   if (!hasIv) {
-    return { status: "FAIL", reason: "AES IV missing from database", keyOk };
+    return { status: "FAIL", category: CATEGORIES.KEY_OR_DECRYPTION_FAILURE, layer: "AES", reason: "AES IV missing from database", keyOk, timestamp: ts };
   }
   if (!keyOk) {
-    return { status: "FAIL", reason: "AES key not found in Key Vault", hasIv };
+    return { status: "FAIL", category: CATEGORIES.KEY_OR_DECRYPTION_FAILURE, layer: "AES", reason: "AES key not found in Key Vault", hasIv, timestamp: ts };
   }
-  return { status: "PASS", algorithm: "AES-256-CBC", hasIv, keyOk };
+  return {
+    status:            "PASS",
+    category:          CATEGORIES.SECURE,
+    layer:             "AES",
+    algorithm:         "AES-256-CBC",
+    encryptionVersion: file.encryptionVersion ?? "v1",
+    hasIv,
+    keyOk,
+    timestamp:         ts,
+  };
 };
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Helper — Azure blob existence
 ─────────────────────────────────────────────────────────────────────────────*/
 const checkAzure = async (file) => {
+  const ts = new Date().toISOString();
   try {
     const exists = await verifyBlobExists(file.azureBlobName);
     return {
-      status:   exists ? "PASS" : "FAIL",
-      blobName: file.azureBlobName,
+      status:    exists ? "PASS" : "FAIL",
+      category:  exists ? CATEGORIES.SECURE : CATEGORIES.PRIMARY_STORAGE_UNAVAILABLE,
+      layer:     "AZURE",
+      blobName:  file.azureBlobName,
+      timestamp: ts,
       ...(exists ? {} : { reason: "Blob not found in Azure Blob Storage" }),
     };
   } catch (err) {
-    return { status: "FAIL", error: err.message };
+    return {
+      status:    "FAIL",
+      category:  CATEGORIES.PRIMARY_STORAGE_UNAVAILABLE,
+      layer:     "AZURE",
+      reason:    "Azure service unreachable",
+      error:     err.message,
+      timestamp: ts,
+    };
   }
 };
 
@@ -148,13 +268,41 @@ const checkAzure = async (file) => {
    Helper — IPFS backup status
 ─────────────────────────────────────────────────────────────────────────────*/
 const checkIpfs = (file) => {
-  const done = file.ipfsStatus === "done" && Boolean(file.ipfsCid);
+  const ts     = new Date().toISOString();
+  const done   = file.ipfsStatus === "done" && Boolean(file.ipfsCid);
+  const failed = file.ipfsStatus === "failed";
+
+  if (done) {
+    return {
+      status:     "PASS",
+      category:   CATEGORIES.SECURE,
+      layer:      "IPFS",
+      cid:        file.ipfsCid,
+      ipfsStatus: file.ipfsStatus,
+      ipfsUrl:    file.ipfsUrl ?? null,
+      timestamp:  ts,
+    };
+  }
+  if (failed) {
+    return {
+      status:     "FAIL",
+      category:   CATEGORIES.BACKUP_UNAVAILABLE,
+      layer:      "IPFS",
+      cid:        file.ipfsCid ?? null,
+      ipfsStatus: file.ipfsStatus,
+      reason:     "IPFS backup failed — backup unavailable",
+      timestamp:  ts,
+    };
+  }
+  // Pending / uploading — NOT a failure
   return {
-    status:     done ? "PASS" : (file.ipfsStatus === "failed" ? "FAIL" : "PENDING"),
+    status:     "PENDING",
+    category:   CATEGORIES.PENDING,
+    layer:      "IPFS",
     cid:        file.ipfsCid ?? null,
     ipfsStatus: file.ipfsStatus,
-    ipfsUrl:    file.ipfsUrl ?? null,
-    ...(done ? {} : { note: "IPFS backup not yet completed" }),
+    note:       "IPFS backup not yet completed — not a failure",
+    timestamp:  ts,
   };
 };
 
@@ -167,8 +315,8 @@ const getFileIntegrity = async (req, res) => {
     const { fileId } = req.params;
     const ownerId    = req.user.userId;
 
-    // Fetch with encryptionIv (needed for AES check)
-    const file = await GenomicFile.findById(fileId).select("+encryptionIv");
+    // Fetch with encryptionIv (needed for AES check) and uploadSha256Hash (needed for SHA check)
+    const file = await GenomicFile.findById(fileId).select("+encryptionIv +uploadSha256Hash");
     if (!file || file.uploadStatus !== "confirmed") {
       return res.status(404).json({ success: false, message: "File not found" });
     }
@@ -176,9 +324,20 @@ const getFileIntegrity = async (req, res) => {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
 
-    // Run all 5 checks in parallel (except SHA-256 which uses streaming — run first
-    // to avoid concurrent Azure reads for very large files)
-    const sha256Result = await checkSha256(file);
+    // ?skipSha=true → skip blob streaming (fast auto-check on page load).
+    // Omit the param for the full Re-verify with live SHA-256 comparison.
+    const skipSha = req.query.skipSha === "true";
+
+    // SHA-256: streams the full blob — skip for fast auto-checks
+    const sha256Result = skipSha
+      ? {
+          status:    "SKIP",
+          category:  null,
+          layer:     "SHA256",
+          note:      "Click Re-verify for live SHA-256 comparison against stored hash",
+          timestamp: new Date().toISOString(),
+        }
+      : await checkSha256(file);
 
     const [blockchainResult, aesResult, azureResult] = await Promise.all([
       checkBlockchain(file),
@@ -187,16 +346,17 @@ const getFileIntegrity = async (req, res) => {
     ]);
     const ipfsResult = checkIpfs(file);
 
-    // Overall status: SECURE only if all non-SKIP checks pass
-    const allChecks = [sha256Result, blockchainResult, aesResult, azureResult, ipfsResult];
-    const anyFail   = allChecks.some(c => c.status === "FAIL");
-    const overall   = anyFail ? "AT_RISK" : "SECURE";
+    // Overall: derived by explicit priority rules (R3.4)
+    const allLayers = [sha256Result, blockchainResult, aesResult, azureResult, ipfsResult];
+    const overallCategory = deriveOverallCategory(allLayers);
+
 
     return res.status(200).json({
       success:   true,
       fileId:    String(file._id),
       fileName:  file.originalName,
       datasetId: file.datasetId ?? null,
+      // Per-layer results — authoritative source of information
       checks: {
         sha256:     sha256Result,
         blockchain: blockchainResult,
@@ -204,7 +364,12 @@ const getFileIntegrity = async (req, res) => {
         azure:      azureResult,
         ipfs:       ipfsResult,
       },
-      overall,
+      // Overall — summary convenience only; see per-layer checks for full detail
+      overall:          overallCategory,
+      overallIsFailure: ![
+        CATEGORIES.SECURE,
+        CATEGORIES.PENDING,
+      ].includes(overallCategory),
       checkedAt: new Date().toISOString(),
     });
   } catch (err) {

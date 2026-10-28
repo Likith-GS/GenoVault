@@ -31,23 +31,27 @@ const {
 /* ─────────────────────────────────────────────────────────────────
    POST /api/provenance/scans
    Starts a new misuse detection scan.
-   Body: { fileId? }  — omit to scan all owner files
+   Body: { fileId?, accessionId? }  — omit fileId to scan all owner files;
+         provide accessionId (e.g. "SRR12345678") to scan a specific NCBI accession directly
 ─────────────────────────────────────────────────────────────────*/
 const startScan = async (req, res) => {
   try {
-    const ownerId = req.user.userId;
-    const fileId  = req.body.fileId || null;
+    const ownerId           = req.user.userId;
+    const fileId            = req.body.fileId       || null;
+    const targetAccessionId = req.body.accessionId  || null;
 
-    const { scanId, status } = await detectionService.startScan(ownerId, fileId);
+    const { scanId, status } = await detectionService.startScan(ownerId, fileId, targetAccessionId);
 
     logEvent("MISUSE_SCAN_STARTED", ownerId, "owner", null, {
       status:  "success",
-      details: { scanId, fileId },
+      details: { scanId, fileId, targetAccessionId },
     }).catch(console.warn);
 
     return res.status(202).json({
       success: true,
-      message: "Scan started. Use the scanId to check progress.",
+      message: targetAccessionId
+        ? `Direct scan started for accession ${targetAccessionId}. Use scanId to check progress.`
+        : "Scan started. Use the scanId to check progress.",
       scanId,
       status,
     });
@@ -56,6 +60,7 @@ const startScan = async (req, res) => {
     return res.status(500).json({ success: false, message: "Failed to start scan" });
   }
 };
+
 
 /* ─────────────────────────────────────────────────────────────────
    GET /api/provenance/scans

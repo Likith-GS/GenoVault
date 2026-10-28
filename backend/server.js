@@ -46,8 +46,10 @@ connectDB().then(async () => {
 
 // Ensure Azure Blob container exists + CORS configured on startup (non-blocking)
 const { ensureContainerExists, configureCors } = require("./services/azureService");
+const { runStartupValidation }                = require("./services/walletSecurityService");
 ensureContainerExists().catch(() => { });
 configureCors().catch(() => { }); // Critical for fast browser-direct uploads
+runStartupValidation().catch(() => { }); // Phase 3: wallet + identity config check
 
 // ── 2. Security middleware ────────────────────────────────────
 app.use(helmet()); // Sets secure HTTP headers

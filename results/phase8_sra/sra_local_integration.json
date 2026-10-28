@@ -1,0 +1,161 @@
+{
+  "experiment": "sra_local_integration",
+  "runAt": "2026-10-14T17:23:03.737Z",
+  "nRuns": 5,
+  "description": "End-to-end local integration test of SRA scan detection pipeline. Uses synthetic FASTQ — simulates the SRA retrieval + normalize + detect + classify stages without an NCBI API call.",
+  "pipeline": "generateWatermarkSeed → buildWatermarkRecord → embedWatermark → [mock SRA FASTQ] → normalizeFASTQ → detectWatermarkInCandidate → classify",
+  "dataset": {
+    "source": "SYNTHETIC — crypto.randomBytes(), no real genomic data",
+    "reads": 500,
+    "readLen": 150,
+    "dataType": "FASTQ (quality-score LSB watermarking)"
+  },
+  "results": {
+    "detected": 5,
+    "verified": 5,
+    "detectionRate": "100.0%",
+    "verificationRate": "100.0%",
+    "totalPipelineMs": {
+      "n": 5,
+      "mean": 534.009,
+      "median": 519.673,
+      "sd": 86.181,
+      "min": 449.7101,
+      "max": 693.9663,
+      "unit": "ms"
+    },
+    "detectStepMs": {
+      "n": 5,
+      "mean": 4.415,
+      "median": 3.623,
+      "sd": 1.581,
+      "min": 2.7596,
+      "max": 6.9733,
+      "unit": "ms"
+    },
+    "normalizeStepMs": {
+      "n": 5,
+      "mean": 0.337,
+      "median": 0.363,
+      "sd": 0.081,
+      "min": 0.2109,
+      "max": 0.4415,
+      "unit": "ms"
+    },
+    "embedStepMs": {
+      "n": 5,
+      "mean": 528.032,
+      "median": 511.825,
+      "sd": 83.737,
+      "min": 445.6921,
+      "max": 683.0135,
+      "unit": "ms"
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "stages": {
+        "watermarkRecordMs": 4.6125,
+        "embedMs": 683.0135,
+        "fileSizeBytes": 162390,
+        "normalizeMs": 0.3632,
+        "nReadsNormalized": 500,
+        "detectMs": 5.4967,
+        "matchScore": 1,
+        "classifyMs": 0.0459,
+        "totalMs": 693.9663
+      },
+      "detected": true,
+      "verified": true,
+      "confidence": "CONFIRMED",
+      "classification": "UNAUTHORIZED_REDISTRIBUTION",
+      "errors": []
+    },
+    {
+      "run": 2,
+      "stages": {
+        "watermarkRecordMs": 0.3824,
+        "embedMs": 511.8248,
+        "fileSizeBytes": 162390,
+        "normalizeMs": 0.4415,
+        "nReadsNormalized": 500,
+        "detectMs": 6.9733,
+        "matchScore": 1,
+        "classifyMs": 0.0021,
+        "totalMs": 519.6725
+      },
+      "detected": true,
+      "verified": true,
+      "confidence": "CONFIRMED",
+      "classification": "UNAUTHORIZED_REDISTRIBUTION",
+      "errors": []
+    },
+    {
+      "run": 3,
+      "stages": {
+        "watermarkRecordMs": 0.2228,
+        "embedMs": 465.1378,
+        "fileSizeBytes": 162390,
+        "normalizeMs": 0.3866,
+        "nReadsNormalized": 500,
+        "detectMs": 3.2227,
+        "matchScore": 1,
+        "classifyMs": 0.0014,
+        "totalMs": 469.0133
+      },
+      "detected": true,
+      "verified": true,
+      "confidence": "CONFIRMED",
+      "classification": "UNAUTHORIZED_REDISTRIBUTION",
+      "errors": []
+    },
+    {
+      "run": 4,
+      "stages": {
+        "watermarkRecordMs": 0.1496,
+        "embedMs": 445.6921,
+        "fileSizeBytes": 162390,
+        "normalizeMs": 0.2109,
+        "nReadsNormalized": 500,
+        "detectMs": 3.6234,
+        "matchScore": 1,
+        "classifyMs": 0.0016,
+        "totalMs": 449.7101
+      },
+      "detected": true,
+      "verified": true,
+      "confidence": "CONFIRMED",
+      "classification": "UNAUTHORIZED_REDISTRIBUTION",
+      "errors": []
+    },
+    {
+      "run": 5,
+      "stages": {
+        "watermarkRecordMs": 0.1203,
+        "embedMs": 534.4899,
+        "fileSizeBytes": 162390,
+        "normalizeMs": 0.2832,
+        "nReadsNormalized": 500,
+        "detectMs": 2.7596,
+        "matchScore": 1,
+        "classifyMs": 0.0016,
+        "totalMs": 537.6842
+      },
+      "detected": true,
+      "verified": true,
+      "confidence": "CONFIRMED",
+      "classification": "UNAUTHORIZED_REDISTRIBUTION",
+      "errors": []
+    }
+  ],
+  "realSRAGaps": [
+    "Real NCBI SRA queries (NCBIAdapter.search()) NOT tested — requires NCBI API key and a public accession containing a watermarked file.",
+    "SRA FASTQ retrieval latency NOT measured — this depends on SRA network throughput and accession size.",
+    "The local test proves that the detection + classification logic is correct and fast. Network I/O is separate."
+  ],
+  "notes": [
+    "The test simulates the worst-case scenario: an exact copy of the watermarked file is presented for detection.",
+    "In a real misuse scenario, the candidate file may have undergone compression, format conversion, or partial re-sequencing — those cases are covered by the robustness harness."
+  ]
+}

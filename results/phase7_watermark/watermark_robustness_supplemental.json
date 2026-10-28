@@ -1,0 +1,178 @@
+{
+  "experiment": "watermark_robustness_supplemental",
+  "version": "v1",
+  "campaign": "EVIDENCE_2026-10-17",
+  "runAt": "2026-10-17T14:39:00.137Z",
+  "pipeline": "generateWatermarkSeed->buildWatermarkRecord->embedWatermark(.fastq)->perturbFn->detectWatermarkInCandidate",
+  "nRuns": 5,
+  "syntheticReads": {
+    "count": 500,
+    "readLength": 150,
+    "dataSource": "SYNTHETIC — crypto.randomBytes() only"
+  },
+  "detectionThreshold": "verified===true OR matchScore>=0.85",
+  "notes": [
+    "P6: shuffle changes read order; position selection uses readIdx%reads.length — reordering invalidates the mapping.",
+    "P7: removal shrinks reads.length from 500 to 475, changing ALL modulo computations in position selection. Distinct from P3 (which substitutes, preserving reads.length=500).",
+    "P8: tests parse/serialize byte-level losslessness.",
+    "All data SYNTHETIC. No real genomic data."
+  ],
+  "perturbations": [
+    {
+      "label": "P6_read_reorder",
+      "description": "Fisher-Yates shuffle of all 500 reads. Read count unchanged; position selection recomputed from shuffled array.",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "matchScoreStats": {
+        "mean": 0.5063,
+        "sd": 0.0738,
+        "median": 0.5156,
+        "min": 0.3906,
+        "max": 0.5938
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0.5938,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0.3906,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0.5156,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0.5,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0.5313,
+          "verified": false,
+          "confidence": "LOW"
+        }
+      ]
+    },
+    {
+      "label": "P7_5pct_read_removal",
+      "description": "Delete 25 of 500 reads (random). Array shrinks to 475. Detector recomputes positions mod 475 — different mapping from mod 500.",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "matchScoreStats": {
+        "mean": 0.4844,
+        "sd": 0.0398,
+        "median": 0.4844,
+        "min": 0.4219,
+        "max": 0.5313
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0.4219,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0.5313,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0.5,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0.4844,
+          "verified": false,
+          "confidence": "LOW"
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0.4844,
+          "verified": false,
+          "confidence": "LOW"
+        }
+      ]
+    },
+    {
+      "label": "P8_fastq_reserialize",
+      "description": "normalizeFASTQ then serializeFASTQ with no other change. Tests losslessness of the parse/serialize cycle.",
+      "nRuns": 5,
+      "detected": 5,
+      "notDetected": 0,
+      "detectionRate": "100.0%",
+      "matchScoreStats": {
+        "mean": 1,
+        "sd": 0,
+        "median": 1,
+        "min": 1,
+        "max": 1
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": true,
+          "matchScore": 1,
+          "verified": true,
+          "confidence": "CONFIRMED"
+        },
+        {
+          "run": 2,
+          "detected": true,
+          "matchScore": 1,
+          "verified": true,
+          "confidence": "CONFIRMED"
+        },
+        {
+          "run": 3,
+          "detected": true,
+          "matchScore": 1,
+          "verified": true,
+          "confidence": "CONFIRMED"
+        },
+        {
+          "run": 4,
+          "detected": true,
+          "matchScore": 1,
+          "verified": true,
+          "confidence": "CONFIRMED"
+        },
+        {
+          "run": 5,
+          "detected": true,
+          "matchScore": 1,
+          "verified": true,
+          "confidence": "CONFIRMED"
+        }
+      ]
+    }
+  ]
+}

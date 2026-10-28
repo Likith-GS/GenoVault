@@ -2,9 +2,17 @@
  * blockchainService.js
  * --------------------
  * GenoVault backend blockchain service - v2
- * Single deployer wallet, ORCID keccak256 identity, onlySystem contract.
+ * Single deployer wallet, onlySystem contract.
+ *
+ * Researcher identity derivation:
+ *   V1 (legacy)  — keccak256(ORCID)              used for all existing on-chain records
+ *   V2 (current) — HMAC-SHA256(secret, ORCID)    used for all new access requests
+ *
+ * V1 is preserved unchanged for backward compatibility with immutable Sepolia records.
+ * New requests set identityVersion='v2' on the AccessRequest document.
  */
 const { ethers } = require('ethers');
+const crypto     = require('crypto');
 
 const CONTRACT_ABI = [
   'function registerFile(string calldata fileHash, string calldata ipfsCID) external returns (uint256 fileId)',
@@ -12,8 +20,8 @@ const CONTRACT_ABI = [
   'function approveAccess(uint256 fileId, bytes32 researcherId, uint256 durationSeconds) external',
   'function rejectAccess(uint256 fileId, bytes32 researcherId) external',
   'function revokeAccess(uint256 fileId, bytes32 researcherId) external',
-  'function getFile(uint256 fileId) external view returns (tuple(string fileHash, uint256 timestamp, string ipfsCID, bool exists))',
-  'function getFileByHash(string calldata fileHash) external view returns (uint256 fileId, tuple(string fileHash, uint256 timestamp, string ipfsCID, bool exists) record)',
+  'function getFile(uint256 fileId) external view returns (tuple(string fileHash, address owner, uint256 timestamp, string ipfsCID, bool exists))',
+  'function getFileByHash(string calldata fileHash) external view returns (uint256 fileId, tuple(string fileHash, address owner, uint256 timestamp, string ipfsCID, bool exists) record)',
   'function checkAccess(uint256 fileId, bytes32 researcherId) external view returns (bool hasAccess, uint256 expiryTime)',
   'function getPermission(uint256 fileId, bytes32 researcherId) external view returns (tuple(bool approved, uint256 grantedAt, uint256 expiryTime))',
   'function getFileRequests(uint256 fileId) external view returns (tuple(bytes32 researcherId, uint256 requestedAt, uint8 status)[])',
@@ -27,7 +35,10 @@ const CONTRACT_ABI = [
   'event AccessRevoked(uint256 indexed fileId, bytes32 indexed researcherId, uint256 revokedAt)',
 ];
 
+
+// Reset cached contract instances so the updated ABI takes effect immediately
 let _provider = null, _wallet = null, _contract = null, _readOnlyProv = null, _readOnlyCtx = null;
+
 
 const isBlockchainConfigured = () =>
   Boolean(process.env.BLOCKCHAIN_RPC_URL) &&
@@ -58,15 +69,58 @@ const getReadOnlyContract = () => {
 };
 
 /**
- * orcidToBytes32
- * Deterministically converts a researcher ORCID to bytes32 via keccak256.
- * Same ORCID always produces same bytes32. Raw ORCID is never on-chain.
+ * orcidToBytes32  (V1 — LEGACY)
+ * -------------------------------------------------------------------
+ * Converts a researcher ORCID to bytes32 via keccak256.
+ * Used for ALL existing on-chain records (Sepolia, immutable).
+ * Raw ORCID is never written on-chain.
+ *
+ * ⚠️  Do NOT use for new access requests — use orcidToBytes32Hmac.
+ *     This function is preserved solely for backward compatibility.
+ *
  * @param {string} orcid  e.g. "0000-0002-1825-0097"
- * @returns {string}      bytes32 hex string
+ * @returns {string}      bytes32 hex string (0x-prefixed)
  */
 const orcidToBytes32 = (orcid) => {
   if (!orcid || typeof orcid !== 'string') throw new Error('[Blockchain] orcidToBytes32: ORCID must be non-empty string');
   return ethers.keccak256(ethers.toUtf8Bytes(orcid.trim()));
+};
+
+/**
+ * orcidToBytes32Hmac  (V2 — CURRENT)
+ * -------------------------------------------------------------------
+ * Converts a researcher ORCID to bytes32 via HMAC-SHA256 keyed with
+ * RESEARCHER_ID_HMAC_SECRET. This is a keyed pseudonymous derivation:
+ * the mapping from ORCID to bytes32 cannot be reconstructed without
+ * the secret, preventing dictionary-style attacks against the on-chain
+ * researcher identifiers.
+ *
+ * Security properties:
+ *   - Same ORCID + same secret  → same identifier (deterministic) ✓
+ *   - Different ORCID            → different identifier           ✓
+ *   - Without the secret         → identifier cannot be derived   ✓
+ *   - HMAC-SHA256 output is 32 bytes, which maps directly to bytes32
+ *
+ * Note: this is keyed pseudonymity, not anonymity. The identifier
+ * is stable and linkable across requests by anyone holding the secret.
+ *
+ * @param {string} orcid  e.g. "0000-0002-1825-0097"
+ * @returns {string}      bytes32 hex string (0x-prefixed, 66 chars total)
+ */
+const orcidToBytes32Hmac = (orcid) => {
+  if (!orcid || typeof orcid !== 'string') {
+    throw new Error('[Identity] orcidToBytes32Hmac: ORCID must be a non-empty string');
+  }
+  const secret = process.env.RESEARCHER_ID_HMAC_SECRET;
+  if (!secret) {
+    throw new Error('[Identity] RESEARCHER_ID_HMAC_SECRET is not configured — cannot derive researcher identifier');
+  }
+  // HMAC-SHA256 output is exactly 32 bytes → maps directly to bytes32
+  const mac = crypto
+    .createHmac('sha256', Buffer.from(secret, 'hex'))
+    .update(orcid.trim())
+    .digest();
+  return '0x' + mac.toString('hex');
 };
 
 /**
@@ -102,13 +156,34 @@ const registerFileOnChain = async (sha256HexHash, ipfsCID) => {
 
 const storeFileHashOnChain = (h) => registerFileOnChain(h, '');
 
+// Correct ABI for getFileByHash — matches the deployed contract struct:
+// FileRecord { string fileHash; address owner; uint256 timestamp; string ipfsCID; bool exists; }
+// Always creates a fresh instance to avoid stale cached contract with wrong ABI.
+const VERIFY_ABI = [
+  'function getFileByHash(string calldata fileHash) external view returns (uint256 fileId, tuple(string fileHash, address owner, uint256 timestamp, string ipfsCID, bool exists) record)',
+];
+
 const verifyFileHashOnChain = async (sha256HexHash) => {
   if (!isBlockchainConfigured()) return { verified: false, disabled: true, error: 'Blockchain not configured' };
   try {
-    const contract = getReadOnlyContract();
+    // Always create fresh provider + contract — bypasses any cached instance with stale ABI
+    const rpcUrl  = process.env.BLOCKCHAIN_RPC_URL;
+    const address = process.env.BLOCKCHAIN_CONTRACT_ADDRESS;
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const contract = new ethers.Contract(address, VERIFY_ABI, provider);
+
     const [fileId, record] = await contract.getFileByHash(sha256HexHash);
     if (Number(fileId) === 0) return { verified: false, fileId: null, disabled: false, error: null };
-    return { verified: true, fileId: Number(fileId), fileHash: record.fileHash, timestamp: new Date(Number(record.timestamp) * 1000).toISOString(), ipfsCID: record.ipfsCID, disabled: false, error: null };
+    return {
+      verified:   true,
+      fileId:     Number(fileId),
+      fileHash:   record.fileHash,
+      owner:      record.owner,
+      timestamp:  new Date(Number(record.timestamp) * 1000).toISOString(),
+      ipfsCID:    record.ipfsCID,
+      disabled:   false,
+      error:      null,
+    };
   } catch (err) {
     if (err.message && err.message.includes('Hash not registered')) return { verified: false, fileId: null, disabled: false, error: null };
     console.error('[Blockchain] verifyFileHashOnChain failed:', err.message);
@@ -244,4 +319,26 @@ const getTransactionDetails = async (txHash) => {
   return { hash: tx.hash, from: tx.from, to: tx.to, value: ethers.formatEther(tx.value), gasUsed: receipt.gasUsed.toString(), gasPrice: tx.gasPrice ? ethers.formatUnits(tx.gasPrice, 'gwei') + ' gwei' : null, blockNumber: receipt.blockNumber, status: receipt.status === 1 ? 'success' : 'failed', contractCreated: receipt.contractAddress || null, decodedEvents, etherscanUrl: 'https://sepolia.etherscan.io/tx/' + txHash };
 };
 
-module.exports = { isBlockchainConfigured, orcidToBytes32, registerFileOnChain, storeFileHashOnChain, verifyFileHashOnChain, requestAccess, approveAccess, rejectAccess, revokeAccess, checkAccess, getPendingRequests, getAuditTrail, getContractEvents, getBlockchainStatus, getRecentBlocks, getTransactionDetails };
+module.exports = {
+  isBlockchainConfigured,
+  // Identity derivation — V1 (legacy keccak256) and V2 (HMAC-SHA256)
+  orcidToBytes32,
+  orcidToBytes32Hmac,
+  // File registration & verification
+  registerFileOnChain,
+  storeFileHashOnChain,
+  verifyFileHashOnChain,
+  // Access control
+  requestAccess,
+  approveAccess,
+  rejectAccess,
+  revokeAccess,
+  checkAccess,
+  getPendingRequests,
+  // Audit & explorer
+  getAuditTrail,
+  getContractEvents,
+  getBlockchainStatus,
+  getRecentBlocks,
+  getTransactionDetails,
+};

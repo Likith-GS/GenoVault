@@ -1,0 +1,63 @@
+{
+  "experiment": "fastq_downstream_impact",
+  "executedAt": "2026-10-14T16:45:33Z",
+  "command": "node experiments/fastqDownstreamImpact.js",
+  "exitCode": 0,
+  "dataset": {
+    "syntheticReads": 1000,
+    "readLength": 150,
+    "qualityRange": [
+      20,
+      40
+    ],
+    "totalBases": 150000,
+    "source": "SYNTHETIC — no real patient data"
+  },
+  "nRuns": 5,
+  "embeddingAlgorithm": "GENOMIC_LSB_V1 — 1 LSB bit per read in quality[0]",
+  "metrics": {
+    "meanAbsQualityDiff_Phred": {
+      "rawValues": [
+        0.0006,
+        0.0006,
+        0.0007,
+        0.0002,
+        0.0003
+      ],
+      "mean": 0.00048,
+      "median": 0.0006,
+      "sd": 0.000194,
+      "min": 0.0002,
+      "max": 0.0007,
+      "unit": "Phred units",
+      "threshold": "< 1.0 Phred unit",
+      "passFail": "PASS",
+      "ci95": {
+        "lower": 0.000257,
+        "upper": 0.000703,
+        "t": 2.571,
+        "n": 5
+      },
+      "ci95Method": "Student t-distribution, two-tailed, df=4 (N=5 runs), t_crit=2.776. NOTE: N=5 is small; CI is preliminary and should not be cited as definitive population estimate."
+    },
+    "q30RateAbsDiff": {
+      "rawValues": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean": 0,
+      "median": 0,
+      "sd": 0,
+      "min": 0,
+      "max": 0,
+      "unit": "fraction",
+      "threshold": "< 0.01 fraction",
+      "passFail": "PASS"
+    }
+  },
+  "downstreamToolsTestedDirectly": "NONE — BWA, GATK, FastQC, trimmomatic were NOT run on the synthetic data. Compatibility claims are limited to quality-score magnitude changes only.",
+  "conclusion": "ACCEPTABLE within the tested synthetic experiment. Mean |ΔQuality| = 0.0005 Phred (N=5 runs, 1000×150 bp each), well below the 1.0 Phred threshold. Q30 rate unchanged. Broader compatibility with real analysis pipelines is NOT claimed from this experiment."
+}

@@ -1,0 +1,2 @@
+status,reason,executed_at
+BLOCKED,"Missing live Azure Blob + Filebase/IPFS credentials with a test file registered in both stores","2026-10-14T16:43:00Z"

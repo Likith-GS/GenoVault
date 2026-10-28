@@ -1,0 +1,26 @@
+{
+  "experiment": "security_regressions",
+  "executedAt": "2026-10-14T16:43:41Z",
+  "totalTests": 19,
+  "passed": 19,
+  "failed": 0,
+  "skipped": 0,
+  "categories": {
+    "identity": {
+      "tests": 7,
+      "passed": 7,
+      "failed": 0
+    },
+    "encryption": {
+      "tests": 8,
+      "passed": 8,
+      "failed": 0
+    },
+    "watermarkCrypto": {
+      "tests": 4,
+      "passed": 4,
+      "failed": 0
+    }
+  },
+  "noCredentialsExposed": true
+}

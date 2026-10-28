@@ -40,6 +40,7 @@ const crypto              = require("crypto");
 const WatermarkRegistry   = require("../models/WatermarkRegistry");
 const MisuseScan          = require("../models/MisuseScan");
 const MisuseEvent         = require("../models/MisuseEvent");
+const AccessRequest       = require("../models/AccessRequest");  // R3.5 classification
 const GenomicFile         = require("../models/GenomicFile");
 const { logEvent }        = require("./auditLogService");
 const wmService           = require("./watermarkService");
@@ -54,20 +55,103 @@ const {
 const MATCH_THRESHOLD = 0.85;
 
 // ─────────────────────────────────────────────────────────────────
+// Misuse type classification (R3.5)
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * classifyMisuseEvent  (R3.5)
+ * ─────────────────────────────────────────────────────────────────
+ * Classifies a detected misuse event into one of 6 types.
+ * Uses: WatermarkRegistry context, detection source, match confidence,
+ *       and the latest AccessRequest state for this researcher+file pair.
+ *
+ * Classification rules (evaluated in priority order):
+ *   1. source = NCBI_SRA AND confidence HIGH|CONFIRMED
+ *        → UNAUTHORIZED_REDISTRIBUTION
+ *   2. AccessRequest exists AND status = "revoked"
+ *        → POST_REVOCATION_USE
+ *   3. AccessRequest exists AND status = "approved" AND accessExpiresAt < now
+ *        → EXPIRED_ACCESS_USE
+ *   4. confidence HIGH|CONFIRMED AND source != NCBI_SRA
+ *        → POLICY_VIOLATION
+ *   5. confidence MEDIUM|LOW
+ *        → SUSPECTED_LEAK
+ *   6. Fallback
+ *        → UNCLASSIFIED
+ *
+ * @param {object} wmRecord  WatermarkRegistry document
+ * @param {string} source    "NCBI_SRA" | "MANUAL"
+ * @param {object} result    { matchScore, confidence, verified }
+ * @returns {Promise<string>}
+ */
+async function classifyMisuseEvent(wmRecord, source, result) {
+  try {
+    const confidence     = result.confidence; // "LOW"|"MEDIUM"|"HIGH"|"CONFIRMED"
+    const isHighConfidence = confidence === "HIGH" || confidence === "CONFIRMED";
+
+    // Rule 1: Public redistribution via NCBI SRA
+    if (source === "NCBI_SRA" && isHighConfidence) {
+      return "UNAUTHORIZED_REDISTRIBUTION";
+    }
+
+    // Rules 2 & 3: Check AccessRequest state for this researcher+file pair
+    const accessRequest = await AccessRequest.findOne({
+      researcher: wmRecord.researcherId,
+      file:       wmRecord.fileId,
+    })
+      .select("status accessExpiresAt")
+      .lean()
+      .catch(() => null);
+
+    if (accessRequest) {
+      // Rule 2: Used after revocation
+      if (accessRequest.status === "revoked") {
+        return "POST_REVOCATION_USE";
+      }
+
+      // Rule 3: Used after expiry
+      if (
+        accessRequest.status === "approved" &&
+        accessRequest.accessExpiresAt &&
+        new Date(accessRequest.accessExpiresAt) < new Date()
+      ) {
+        return "EXPIRED_ACCESS_USE";
+      }
+    }
+
+    // Rule 4: High confidence, non-public source
+    if (isHighConfidence) {
+      return "POLICY_VIOLATION";
+    }
+
+    // Rule 5: Lower confidence
+    if (confidence === "MEDIUM" || confidence === "LOW") {
+      return "SUSPECTED_LEAK";
+    }
+
+    return "UNCLASSIFIED";
+  } catch (err) {
+    console.warn("[classifyMisuseEvent] Falling back to UNCLASSIFIED:", err.message);
+    return "UNCLASSIFIED";
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * startScan(ownerId, fileId?)
+ * startScan(ownerId, fileId?, targetAccessionId?)
  *
  * Creates a MisuseScan record and fires runScan asynchronously.
  * Returns the scanId immediately — does NOT wait for scan completion.
  *
  * @param {string}      ownerId
- * @param {string|null} fileId  – null = scan all owner's files
+ * @param {string|null} fileId            – null = scan all owner's files
+ * @param {string|null} targetAccessionId – optional specific SRR/ERR accession to check directly
  * @returns {Promise<{ scanId: string, status: string }>}
  */
-async function startScan(ownerId, fileId = null) {
+async function startScan(ownerId, fileId = null, targetAccessionId = null) {
   const scanId = "SCN-" + crypto.randomBytes(4).toString("hex").toUpperCase();
 
   const scan = await MisuseScan.create({
@@ -79,7 +163,7 @@ async function startScan(ownerId, fileId = null) {
   });
 
   // Fire-and-forget: run the scan in the background
-  setImmediate(() => runScan(scanId).catch((e) => {
+  setImmediate(() => runScan(scanId, targetAccessionId).catch((e) => {
     console.error(`[MisuseDetection] Fatal error in runScan(${scanId}):`, e.message);
     MisuseScan.findOneAndUpdate({ scanId }, {
       status: "FAILED",
@@ -100,7 +184,12 @@ async function startScan(ownerId, fileId = null) {
  * Executes the full misuse detection pipeline for a scan.
  * Called via setImmediate from startScan — never directly.
  */
-async function runScan(scanId) {
+/**
+ * runScan(scanId, targetAccessionId?)
+ * @param {string}      scanId
+ * @param {string|null} targetAccessionId  optional specific accession to check
+ */
+async function runScan(scanId, targetAccessionId = null) {
   console.log(`[MisuseDetection] Starting scan ${scanId}`);
 
   await MisuseScan.findOneAndUpdate({ scanId }, {
@@ -120,7 +209,6 @@ async function runScan(scanId) {
     scan = await MisuseScan.findOne({ scanId });
 
     // ── Step 1: Load registered watermarks ────────────────────────
-    // CRITICAL: must use .select('+watermarkSeed') to override select:false
     const wmQuery = { ownerId: scan.ownerId, status: "active" };
     if (scan.fileId) wmQuery.fileId = scan.fileId;
 
@@ -142,47 +230,68 @@ async function runScan(scanId) {
 
     console.log(`[MisuseDetection] Loaded ${watermarkRecords.length} watermark records`);
 
-    // ── Step 2: Discover candidates via NCBI ──────────────────────
-    // Build dataset metadata query from files associated with this owner
-    const fileIds = [...new Set(watermarkRecords.map(r => String(r.fileId)))];
-    const files   = await GenomicFile.find({ _id: { $in: fileIds } })
-      .select("originalName extension metadata organism");
-
-    const datasetMetadata = _buildDatasetMetadata(files);
-
-    // Health-check NCBI before querying
-    const health = await ncbiAdapter.healthCheck();
-    if (!health.ok) {
-      console.warn(`[MisuseDetection] NCBI unreachable: ${health.error}`);
-      await MisuseScan.findOneAndUpdate({ scanId }, {
-        status:      "PARTIAL",
-        completedAt: new Date(),
-        error:       "NCBI E-utilities unreachable",
-        "sources.0.status": "UNAVAILABLE",
-        "sources.0.error":  health.error,
-      });
-
-      logEvent("MISUSE_SCAN_COMPLETED", scan.ownerId, "system", null, {
-        status: "failure",
-        details: { scanId, reason: "NCBI unavailable", result: "PARTIAL" },
-      }).catch(console.warn);
-
-      return;
-    }
-
+    // ── Step 2: Discover candidates ────────────────────────────────
     let candidateIds;
-    try {
-      candidateIds = await ncbiAdapter.search(datasetMetadata, 20);
-      totalCandidates = candidateIds.length;
+
+    if (targetAccessionId) {
+      // Direct mode: check a specific accession (no metadata search needed)
+      console.log(`[MisuseDetection] Direct scan for accession: ${targetAccessionId}`);
+      candidateIds    = [targetAccessionId.trim()];
+      totalCandidates = 1;
       await MisuseScan.findOneAndUpdate({ scanId }, {
-        totalCandidates,
-        "sources.0.candidatesFound": totalCandidates,
+        totalCandidates: 1,
+        "sources.0.candidatesFound": 1,
       });
-    } catch (searchErr) {
-      console.warn(`[MisuseDetection] NCBI search failed: ${searchErr.message}`);
-      sourceFailed = true;
-      candidateIds = [];
+    } else {
+      // Normal mode: search NCBI by metadata
+      const fileIds = [...new Set(watermarkRecords.map(r => String(r.fileId)))];
+      const files   = await GenomicFile.find({ _id: { $in: fileIds } })
+        .select("originalName extension metadata organism datasetId");
+
+      const datasetMetadata = _buildDatasetMetadata(files);
+
+      // Health-check NCBI before querying
+      const health = await ncbiAdapter.healthCheck();
+      if (!health.ok) {
+        console.warn(`[MisuseDetection] NCBI unreachable: ${health.error}`);
+        await MisuseScan.findOneAndUpdate({ scanId }, {
+          status:      "PARTIAL",
+          completedAt: new Date(),
+          error:       "NCBI E-utilities unreachable",
+          "sources.0.status": "UNAVAILABLE",
+          "sources.0.error":  health.error,
+        });
+        logEvent("MISUSE_SCAN_COMPLETED", scan.ownerId, "system", null, {
+          status: "failure",
+          details: { scanId, reason: "NCBI unavailable", result: "PARTIAL" },
+        }).catch(console.warn);
+        return;
+      }
+
+      // Derive a deterministic maxResults (10–15) from this file's watermark seeds.
+      // Same file → same seeds → same count every scan.
+      // Different file → different seeds → different count.
+      const seedConcat   = watermarkRecords.map(r => r.watermarkSeed || "").join("|");
+      const seedHash     = crypto.createHash("sha256").update(seedConcat).digest();
+      const deterministicMax = 10 + (seedHash.readUInt32BE(0) % 6); // 10, 11, 12, 13, 14, or 15
+
+      console.log(`[MisuseDetection] Deterministic maxResults=${deterministicMax} for this file`);
+
+      try {
+        candidateIds = await ncbiAdapter.search(datasetMetadata, deterministicMax);
+        totalCandidates = candidateIds.length;
+        await MisuseScan.findOneAndUpdate({ scanId }, {
+          totalCandidates,
+          "sources.0.candidatesFound": totalCandidates,
+        });
+      } catch (searchErr) {
+        console.warn(`[MisuseDetection] NCBI search failed: ${searchErr.message}`);
+        sourceFailed = true;
+
+        candidateIds = [];
+      }
     }
+
 
     // ── Step 3: Process each candidate ───────────────────────────
     for (const accessionId of candidateIds) {
@@ -330,6 +439,9 @@ async function _processCandidateAccession({ accessionId, scanId, watermarkRecord
       stats.possibleMatches.inc();
     }
 
+    // Classify the misuse event type (R3.5)
+    const misuseType = await classifyMisuseEvent(wmRecord, "NCBI_SRA", result);
+
     // Create or update MisuseEvent (deduplicated via compound unique index)
     const eventId = "MSE-" + crypto.randomBytes(3).toString("hex").toUpperCase();
     let savedEvent;
@@ -357,6 +469,7 @@ async function _processCandidateAccession({ accessionId, scanId, watermarkRecord
             watermarkMatchScore: result.matchScore,
             watermarkIntegrity:  result.integrity,
             overallConfidence:   result.confidence,
+            misuseType,                              // R3.5
             blockchainStatus:    "PENDING",
             detectedAt:          new Date(),
           },
@@ -365,7 +478,8 @@ async function _processCandidateAccession({ accessionId, scanId, watermarkRecord
       );
     } catch (dupErr) {
       if (dupErr.code !== 11000) throw dupErr;
-      // Duplicate — already recorded from a previous scan; update match score if improved
+      // Duplicate — already recorded from a previous scan; update match score if improved,
+      // and update misuseType if a better classification is now possible (R3.5)
       savedEvent = await MisuseEvent.findOneAndUpdate(
         {
           watermarkId:    wmRecord.watermarkId,
@@ -374,7 +488,7 @@ async function _processCandidateAccession({ accessionId, scanId, watermarkRecord
         },
         {
           $max: { watermarkMatchScore: result.matchScore },
-          $set: { status: _bestStatus(status) },
+          $set: { status: _bestStatus(status), misuseType },  // R3.5
         },
         { new: true }
       );
@@ -406,19 +520,50 @@ async function _processCandidateAccession({ accessionId, scanId, watermarkRecord
 /**
  * _buildDatasetMetadata(files)
  * Extracts NCBI-queryable metadata from GenomicFile documents.
+ * Prioritises unique identifiers (datasetId, sampleId, accession hints)
+ * over generic terms to produce a tight, low-noise NCBI search query.
  */
 function _buildDatasetMetadata(files) {
   const metadata = { keywords: [] };
+
   for (const f of files) {
+    // Core taxonomy / sequencing metadata
     if (f.metadata?.organism)        metadata.organism        = f.metadata.organism;
     if (f.metadata?.libraryStrategy) metadata.libraryStrategy = f.metadata.libraryStrategy;
     if (f.metadata?.libraryLayout)   metadata.libraryLayout   = f.metadata.libraryLayout;
     if (f.metadata?.instrument)      metadata.instrument      = f.metadata.instrument;
     if (f.metadata?.phenotype)       metadata.phenotype       = f.metadata.phenotype;
-    if (f.originalName)              metadata.keywords.push(f.originalName.replace(/\.[^.]+$/, ""));
+
+    // Unique identifiers — strongest search discriminators
+    if (f.metadata?.datasetId)    metadata.keywords.push(f.metadata.datasetId);
+    if (f.metadata?.sampleId)     metadata.keywords.push(f.metadata.sampleId);
+    if (f.metadata?.bioProjectId) metadata.keywords.push(f.metadata.bioProjectId);
+    if (f.metadata?.bioSampleId)  metadata.keywords.push(f.metadata.bioSampleId);
+    if (f.metadata?.sraAccession) metadata.keywords.push(f.metadata.sraAccession);
+
+    // Additional biosample attributes
+    if (f.metadata?.tissue)       metadata.keywords.push(f.metadata.tissue);
+    if (f.metadata?.cellLine)     metadata.keywords.push(f.metadata.cellLine);
+    if (f.metadata?.disease)      metadata.keywords.push(f.metadata.disease);
+
+    // File stem — strip all extensions (.fastq.gz → use stem only)
+    if (f.originalName) {
+      const stem = f.originalName
+        .replace(/\.fastq\.gz$/i, "")
+        .replace(/\.fastq$/i,     "")
+        .replace(/\.bam$/i,       "")
+        .replace(/\.vcf$/i,       "")
+        .trim();
+      if (stem.length >= 4) metadata.keywords.push(stem);
+    }
   }
+
+  // De-duplicate keywords
+  metadata.keywords = [...new Set(metadata.keywords.filter(Boolean))];
+
   return metadata;
 }
+
 
 /**
  * _bestStatus(newStatus)

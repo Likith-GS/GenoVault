@@ -25,9 +25,9 @@ interface LayerResult {
 }
 
 interface IntegrityResult {
-  fileId:    string;
-  fileName:  string;
-  datasetId: string | null;
+  fileId:           string;
+  fileName:         string;
+  datasetId:        string | null;
   checks: {
     sha256:     LayerResult;
     blockchain: LayerResult;
@@ -35,8 +35,9 @@ interface IntegrityResult {
     azure:      LayerResult;
     ipfs:       LayerResult;
   };
-  overall:   "SECURE" | "AT_RISK";
-  checkedAt: string;
+  overall:          string;   // SECURE | PENDING | INTEGRITY_VIOLATION | KEY_OR_DECRYPTION_FAILURE | etc.
+  overallIsFailure: boolean;  // true for anything other than SECURE or PENDING
+  checkedAt:        string;
 }
 
 interface SimpleFile {
@@ -90,10 +91,26 @@ const Verification = () => {
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
+  // Full integrity check — Re-verify button: includes live SHA-256 blob streaming.
   const checkFile = useCallback(async (fileId: string) => {
     setChecking(c => ({ ...c, [fileId]: true }));
     try {
+      // No skipSha → full check including live SHA-256 vs blockchainFileHash comparison
       const res  = await fetch(`${API_BASE}/integrity/${fileId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (res.ok && data.success) setResults(r => ({ ...r, [fileId]: data as IntegrityResult }));
+    } catch { /* ignore */ } finally { setChecking(c => ({ ...c, [fileId]: false })); }
+  }, [token]);
+
+  // Fast auto-check on page load: skipSha=true skips 500MB blob streaming.
+  // AES / Azure / IPFS / Blockchain results are instant. SHA shows as SKIP with
+  // a prompt to click Re-verify for the live hash comparison.
+  const autoCheckFile = useCallback(async (fileId: string) => {
+    setChecking(c => ({ ...c, [fileId]: true }));
+    try {
+      const res  = await fetch(`${API_BASE}/integrity/${fileId}?skipSha=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = await res.json();
       if (res.ok && data.success) setResults(r => ({ ...r, [fileId]: data as IntegrityResult }));
     } catch { /* ignore */ } finally { setChecking(c => ({ ...c, [fileId]: false })); }
@@ -101,11 +118,12 @@ const Verification = () => {
 
   useEffect(() => {
     if (!token || files.length === 0) return;
-    files.forEach(f => checkFile(f._id));
-  }, [token, files, checkFile]);
+    files.forEach(f => autoCheckFile(f._id));
+  }, [token, files, autoCheckFile]);
 
   const secureCount = Object.values(results).filter(r => r.overall === "SECURE").length;
-  const atRiskCount = Object.values(results).filter(r => r.overall === "AT_RISK").length;
+  const atRiskCount = Object.values(results).filter(r => r.overallIsFailure).length;
+
 
   return (
     <>

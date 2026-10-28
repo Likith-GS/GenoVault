@@ -1,0 +1,30 @@
+{
+  "experiment": "v2_over_v1_overhead",
+  "executedAt": "2026-10-14T16:45:04Z",
+  "note": "Overhead = mean(V2) - mean(V1). Negative overhead at 100KB reflects noise at N=3.",
+  "overheadBySize": {
+    "10KB": {
+      "encryptMs": 0.087,
+      "decryptMs": 0.106,
+      "acceptableUnder10ms": true
+    },
+    "100KB": {
+      "encryptMs": -0.522,
+      "decryptMs": 0.089,
+      "acceptableUnder10ms": true,
+      "note": "Negative: noise artifact at N=3"
+    },
+    "1024KB": {
+      "encryptMs": 3.271,
+      "decryptMs": 1.051,
+      "acceptableUnder10ms": true
+    }
+  },
+  "stagesNotMeasured": [
+    "Azure blob download",
+    "Key Vault key retrieval",
+    "IPFS upload",
+    "Response streaming"
+  ],
+  "stagesNotMeasuredReason": "Cloud credentials required (BLOCKED)"
+}

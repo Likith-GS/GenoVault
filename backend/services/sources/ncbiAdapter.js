@@ -34,7 +34,7 @@ const EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const API_KEY    = process.env.NCBI_API_KEY || null;
 const TOOL_EMAIL = process.env.NCBI_TOOL_EMAIL || "genovault@example.com";
 const TOOL_NAME  = "GenoVault";
-const MAX_RESULTS = 20;
+const MAX_RESULTS = 15;  // Upper bound; actual per-scan value is deterministic (10–15) based on file
 
 // ─────────────────────────────────────────────────────────────────
 // Internal HTTP helper
@@ -59,6 +59,37 @@ function httpGet(targetUrl, timeoutMs = 15000) {
     req.on("timeout", () => {
       req.destroy();
       reject(new Error(`NCBI request timed out (${timeoutMs}ms): ${targetUrl}`));
+    });
+  });
+}
+
+/**
+ * httpGetBuffer(targetUrl, timeoutMs)
+ * Like httpGet but returns a Buffer (for binary / gzip FASTQ downloads).
+ * Follows one level of HTTP redirect.
+ */
+function httpGetBuffer(targetUrl, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const parsed  = new url.URL(targetUrl);
+    const adapter = parsed.protocol === "https:" ? https : http;
+
+    const req = adapter.get(targetUrl, { timeout: timeoutMs }, (res) => {
+      // Follow redirect
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return httpGetBuffer(res.headers.location, timeoutMs).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`HTTP ${res.statusCode} for ${targetUrl}`));
+      }
+      const chunks = [];
+      res.on("data",  (c) => chunks.push(c));
+      res.on("end",   () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    });
+    req.on("error",   reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error(`Download timed out (${timeoutMs}ms): ${targetUrl}`));
     });
   });
 }
@@ -99,27 +130,59 @@ function buildEutilsUrl(endpoint, params = {}) {
  * @returns {Promise<string[]>}  SRA accession IDs (e.g. ["SRR123456", ...])
  */
 async function search(datasetMetadata = {}, maxResults = MAX_RESULTS) {
-  const terms = [];
+  const mandatory = [];   // ALL must match (AND)
+  const optional  = [];   // nice-to-have boosts (OR block)
 
-  if (datasetMetadata.organism)        terms.push(`${datasetMetadata.organism}[Organism]`);
-  if (datasetMetadata.libraryStrategy) terms.push(`${datasetMetadata.libraryStrategy}[Strategy]`);
-  if (datasetMetadata.libraryLayout)   terms.push(`${datasetMetadata.libraryLayout}[Layout]`);
-  if (datasetMetadata.instrument)      terms.push(`${datasetMetadata.instrument}[Platform]`);
-  if (datasetMetadata.phenotype)       terms.push(`${datasetMetadata.phenotype}[All Fields]`);
+  // Organism is the strongest discriminator — require it if present
+  if (datasetMetadata.organism) {
+    mandatory.push(`"${datasetMetadata.organism}"[Organism]`);
+  }
 
+  // Library strategy (WGS, RNA-Seq, etc.) narrows significantly
+  if (datasetMetadata.libraryStrategy) {
+    mandatory.push(`${datasetMetadata.libraryStrategy}[Strategy]`);
+  }
+
+  // Library layout (PAIRED / SINGLE)
+  if (datasetMetadata.libraryLayout) {
+    mandatory.push(`${datasetMetadata.libraryLayout}[Layout]`);
+  }
+
+  // Instrument platform
+  if (datasetMetadata.instrument) {
+    optional.push(`${datasetMetadata.instrument}[Platform]`);
+  }
+
+  // Phenotype / biosample attribute
+  if (datasetMetadata.phenotype) {
+    mandatory.push(`"${datasetMetadata.phenotype}"[All Fields]`);
+  }
+
+  // File stem keywords — use quoted phrase search for exactness
   if (datasetMetadata.keywords && datasetMetadata.keywords.length > 0) {
     for (const kw of datasetMetadata.keywords) {
-      terms.push(`${kw}[All Fields]`);
+      // Only use meaningful stems (skip very short or generic names)
+      if (kw && kw.length >= 4 && !/^(sample|test|file|data|read)$/i.test(kw)) {
+        mandatory.push(`"${kw}"[All Fields]`);
+      }
     }
   }
 
-  if (terms.length === 0) {
-    // No metadata to search on — return empty
+  if (mandatory.length === 0 && optional.length === 0) {
     console.warn("[NCBIAdapter] search() called with no queryable metadata; returning empty");
     return [];
   }
 
-  const query    = terms.join(" AND ");
+  // Build query: mandatory terms AND-joined, optional OR-joined in parens
+  let query = mandatory.join(" AND ");
+  if (optional.length > 0) {
+    const optBlock = optional.join(" OR ");
+    query = query ? `${query} AND (${optBlock})` : `(${optBlock})`;
+  }
+
+  // Restrict to FASTQ-capable runs only
+  query += " AND biomol_dna[Properties]";
+
   const searchUrl = buildEutilsUrl("esearch.fcgi", {
     db:      "sra",
     term:    query,
@@ -127,7 +190,7 @@ async function search(datasetMetadata = {}, maxResults = MAX_RESULTS) {
     retmode: "json",
   });
 
-  console.log(`[NCBIAdapter] esearch query: ${query.slice(0, 120)}...`);
+  console.log(`[NCBIAdapter] esearch query: ${query.slice(0, 200)}`);
 
   let body;
   try {
@@ -144,7 +207,7 @@ async function search(datasetMetadata = {}, maxResults = MAX_RESULTS) {
   }
 
   const ids = parsed?.esearchresult?.idlist || [];
-  console.log(`[NCBIAdapter] esearch returned ${ids.length} candidate IDs`);
+  console.log(`[NCBIAdapter] esearch returned ${ids.length} candidate IDs (query matched ${parsed?.esearchresult?.count || 0} total in SRA)`);
   return ids;
 }
 
@@ -233,15 +296,27 @@ async function retrieveFASTQ(accessionId) {
   const sraToolkitAvailable = await _checkSraToolkitAvailable();
 
   if (!sraToolkitAvailable) {
-    console.warn(
-      `[NCBIAdapter] SRA Toolkit not available — cannot retrieve quality-bearing FASTQ ` +
-      `for ${accessionId}. Recording as METADATA_MATCH_ONLY.`
+    console.log(
+      `[NCBIAdapter] SRA Toolkit not found — trying ENA HTTP fallback for ${accessionId}...`
     );
+
+    // ── ENA fallback: ENA mirrors all SRA data with direct FASTQ download URLs ──
+    try {
+      const enaResult = await _retrieveViaENA(accessionId);
+      if (enaResult.qualitiesAvailable) {
+        return enaResult;
+      }
+      // ENA also failed — fall through to METADATA_MATCH_ONLY
+      console.warn(`[NCBIAdapter] ENA fallback also failed for ${accessionId}: ${enaResult.error}`);
+    } catch (enaErr) {
+      console.warn(`[NCBIAdapter] ENA fallback error for ${accessionId}: ${enaErr.message}`);
+    }
+
     return {
       buffer:             null,
       format:             null,
       qualitiesAvailable: false,
-      error:              "SRA Toolkit not available in runtime environment",
+      error:              "SRA Toolkit not available and ENA HTTP fallback failed",
     };
   }
 
@@ -304,6 +379,70 @@ async function _checkSraToolkitAvailable() {
       resolve(!err);
     });
   });
+}
+
+/**
+ * _retrieveViaENA(accessionId)
+ *
+ * ENA (European Nucleotide Archive) mirrors ALL NCBI SRA data and provides
+ * direct FASTQ download URLs via its REST API — no SRA Toolkit needed.
+ *
+ * API endpoint: https://www.ebi.ac.uk/ena/portal/api/filereport
+ * Returns direct FTP/HTTPS URLs to .fastq.gz files.
+ *
+ * @param {string} accessionId  e.g. "SRR12345678"
+ * @returns {Promise<{ buffer, format, qualitiesAvailable, error? }>}
+ */
+async function _retrieveViaENA(accessionId) {
+  try {
+    // Query ENA Portal API for FASTQ download URLs
+    const enaApiUrl =
+      `https://www.ebi.ac.uk/ena/portal/api/filereport` +
+      `?accession=${encodeURIComponent(accessionId)}` +
+      `&result=read_run&fields=fastq_ftp,fastq_aspera,run_accession` +
+      `&format=json`;
+
+    console.log(`[NCBIAdapter/ENA] Querying ENA for ${accessionId}...`);
+    const enaRaw  = await httpGet(enaApiUrl, 20000);
+    const enaData = JSON.parse(enaRaw);
+
+    if (!Array.isArray(enaData) || enaData.length === 0) {
+      return { buffer: null, format: null, qualitiesAvailable: false,
+               error: `ENA: no records found for ${accessionId}` };
+    }
+
+    const record   = enaData[0];
+    const ftpField = record.fastq_ftp || "";
+
+    if (!ftpField) {
+      return { buffer: null, format: null, qualitiesAvailable: false,
+               error: `ENA: no fastq_ftp URLs for ${accessionId}` };
+    }
+
+    // ENA returns semicolon-separated FTP paths (no protocol prefix)
+    // Take the first file URL
+    const ftpPaths = ftpField.split(";").filter(Boolean);
+    const httpsUrl = "https://" + ftpPaths[0].replace(/^ftp:\/\//, "");
+
+    console.log(`[NCBIAdapter/ENA] Downloading FASTQ from: ${httpsUrl}`);
+    const gzBuffer = await httpGetBuffer(httpsUrl, 180000); // 3 min timeout
+
+    console.log(`[NCBIAdapter/ENA] ✅ Downloaded ${(gzBuffer.length / 1e6).toFixed(1)} MB for ${accessionId}`);
+
+    return {
+      buffer:             gzBuffer,      // may be gzip-compressed (.fastq.gz)
+      format:             "FASTQ",
+      qualitiesAvailable: true,
+    };
+
+  } catch (err) {
+    return {
+      buffer:             null,
+      format:             null,
+      qualitiesAvailable: false,
+      error:              `ENA retrieval error: ${err.message}`,
+    };
+  }
 }
 
 module.exports = { search, getRunInfo, healthCheck, retrieveFASTQ };

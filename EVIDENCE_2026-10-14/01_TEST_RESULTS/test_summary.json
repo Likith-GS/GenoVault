@@ -1,0 +1,42 @@
+{
+  "executedAt": "2026-10-14T16:43:41Z",
+  "command": "npx jest tests/ --json --outputFile=../results/jest_results_fresh.json",
+  "totalSuites": 4,
+  "totalTests": 54,
+  "passed": 54,
+  "failed": 0,
+  "skipped": 0,
+  "blocked": 0,
+  "totalDurationMs": 26213,
+  "suites": [
+    {
+      "suite": "encryption.test.js",
+      "phase": "Phase 2 — Encrypt-then-MAC (R3.2)",
+      "tests": 8,
+      "passed": 8,
+      "failed": 0
+    },
+    {
+      "suite": "identity.test.js",
+      "phase": "Phase 1 — Identity Versioning (R3.1)",
+      "tests": 7,
+      "passed": 7,
+      "failed": 0
+    },
+    {
+      "suite": "integrity.test.js",
+      "phase": "Phase 5 — Integrity Categories (R3.4)",
+      "tests": 10,
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "suite": "watermark.test.js",
+      "phase": "Tests 1–14/15/16–26/27–29",
+      "tests": 29,
+      "passed": 29,
+      "failed": 0
+    }
+  ],
+  "overlapNote": "No overlap between suites. watermark.test.js T1-29 covers functional/crypto/concurrent/robustness. Not the same as Exp B harness."
+}

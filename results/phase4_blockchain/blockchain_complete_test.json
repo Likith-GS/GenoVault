@@ -1,0 +1,215 @@
+{
+  "experiment": "blockchain_complete_test",
+  "runAt": "2026-10-14T17:37:40.892Z",
+  "nRuns": 5,
+  "liveMode": false,
+  "results": {
+    "abiEncodingMs": {
+      "registerFile": {
+        "n": 5,
+        "mean": 1.334,
+        "median": 0.467,
+        "sd": 1.809,
+        "min": 0.3007,
+        "max": 4.9471,
+        "unit": "ms"
+      },
+      "verifyFileHash": {
+        "n": 5,
+        "mean": 0.45,
+        "median": 0.278,
+        "sd": 0.322,
+        "min": 0.2382,
+        "max": 1.0839,
+        "unit": "ms"
+      },
+      "requestAccess": {
+        "n": 5,
+        "mean": 0.434,
+        "median": 0.309,
+        "sd": 0.19,
+        "min": 0.2403,
+        "max": 0.7263,
+        "unit": "ms"
+      },
+      "approveAccess": {
+        "n": 5,
+        "mean": 0.96,
+        "median": 0.909,
+        "sd": 0.732,
+        "min": 0.1388,
+        "max": 2.1476,
+        "unit": "ms"
+      },
+      "revokeAccess": {
+        "n": 5,
+        "mean": 0.347,
+        "median": 0.296,
+        "sd": 0.119,
+        "min": 0.2158,
+        "max": 0.5604,
+        "unit": "ms"
+      }
+    },
+    "transactionSigningMs": {
+      "registerFile": {
+        "n": 5,
+        "mean": 4.594,
+        "median": 2.923,
+        "sd": 3.849,
+        "min": 1.9777,
+        "max": 12.2366,
+        "unit": "ms"
+      },
+      "requestAccess": {
+        "n": 5,
+        "mean": 2.227,
+        "median": 2.21,
+        "sd": 0.365,
+        "min": 1.8683,
+        "max": 2.899,
+        "unit": "ms"
+      },
+      "approveAccess": {
+        "n": 5,
+        "mean": 2.088,
+        "median": 2.197,
+        "sd": 0.235,
+        "min": 1.8142,
+        "max": 2.4054,
+        "unit": "ms"
+      },
+      "revokeAccess": {
+        "n": 5,
+        "mean": 1.897,
+        "median": 1.859,
+        "sd": 0.315,
+        "min": 1.5272,
+        "max": 2.4761,
+        "unit": "ms"
+      }
+    },
+    "gasEstimatesOffline": {
+      "registerFile": {
+        "calldataBytes": 356,
+        "gasMin": 24452,
+        "gasMax": 54452
+      },
+      "verifyFileHash": {
+        "calldataBytes": 228,
+        "gasMin": 23148,
+        "gasMax": 53148
+      },
+      "requestAccess": {
+        "calldataBytes": 196,
+        "gasMin": 22528,
+        "gasMax": 52528
+      },
+      "approveAccess": {
+        "calldataBytes": 196,
+        "gasMin": 22528,
+        "gasMax": 52528
+      },
+      "revokeAccess": {
+        "calldataBytes": 196,
+        "gasMin": 22528,
+        "gasMax": 52528
+      }
+    },
+    "fullCryptoPipelineMs": {
+      "runs": [
+        13.2391,
+        5.4629,
+        6.479,
+        4.4614,
+        7.9984
+      ],
+      "stats": {
+        "n": 5,
+        "mean": 7.528,
+        "median": 6.479,
+        "sd": 3.086,
+        "min": 4.4614,
+        "max": 13.2391,
+        "unit": "ms"
+      }
+    },
+    "sepoliaLatency": {
+      "status": "READ_ONLY",
+      "nRuns": 5,
+      "readMs": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "stats": null
+    }
+  },
+  "summary": {
+    "registerFileABIEncodeMs": {
+      "n": 5,
+      "mean": 1.334,
+      "median": 0.467,
+      "sd": 1.809,
+      "min": 0.3007,
+      "max": 4.9471,
+      "unit": "ms"
+    },
+    "registerFileSignMs": {
+      "n": 5,
+      "mean": 4.594,
+      "median": 2.923,
+      "sd": 3.849,
+      "min": 1.9777,
+      "max": 12.2366,
+      "unit": "ms"
+    },
+    "requestAccessSignMs": {
+      "n": 5,
+      "mean": 2.227,
+      "median": 2.21,
+      "sd": 0.365,
+      "min": 1.8683,
+      "max": 2.899,
+      "unit": "ms"
+    },
+    "approveAccessSignMs": {
+      "n": 5,
+      "mean": 2.088,
+      "median": 2.197,
+      "sd": 0.235,
+      "min": 1.8142,
+      "max": 2.4054,
+      "unit": "ms"
+    },
+    "revokeAccessSignMs": {
+      "n": 5,
+      "mean": 1.897,
+      "median": 1.859,
+      "sd": 0.315,
+      "min": 1.5272,
+      "max": 2.4761,
+      "unit": "ms"
+    },
+    "fullPipelineMeanMs": 7.528
+  },
+  "notMeasured": [
+    "registerFile() mining/confirmation latency — needs funded Sepolia wallet + BLOCKCHAIN_RPC_URL",
+    "gas_used from real receipt — needs live transaction",
+    "Real network confirmation time (nominal Sepolia: ~12s per block)"
+  ],
+  "howToEnableLive": [
+    "1. Add to backend/.env: BLOCKCHAIN_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/<key>",
+    "2. Add to backend/.env: BLOCKCHAIN_CONTRACT_ADDRESS=0x...",
+    "3. Add to backend/.env: PRIVATE_KEY=0x...  (funded Sepolia wallet)",
+    "4. Get free testnet ETH from: https://sepoliafaucet.com or https://faucets.chain.link",
+    "5. Re-run: node experiments/blockchainCompleteTest.js"
+  ],
+  "notes": [
+    "All signing uses disposable random wallets — real PRIVATE_KEY never used in offline mode.",
+    "Synthetic SHA-256/HMAC hashes — no real genomic data or patient information.",
+    "Gas estimates are offline approximations; real gas depends on contract storage operations."
+  ]
+}

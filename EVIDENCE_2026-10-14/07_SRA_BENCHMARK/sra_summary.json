@@ -1,0 +1,18 @@
+{
+  "experiment": "ncbi_sra_discovery_scan",
+  "status": "BLOCKED",
+  "executedAt": "2026-10-14T16:43:00Z",
+  "reason": "The SRA discovery workflow is designed to scan NCBI SRA for publicly leaked watermarked copies. No GenoVault-watermarked file has been submitted to a public NCBI SRA accession; GenoVault watermarks controlled research downloads — it does not produce SRA submissions. A synthetic end-to-end test of the scan pipeline (against a locally hosted FASTQ) is possible but was not implemented in the existing harnesses.",
+  "stagesDocumented": [
+    "1. Query construction and submission to NCBI SRA API",
+    "2. Candidate accession discovery by metadata similarity",
+    "3. Metadata retrieval (study/sample/run accession metadata)",
+    "4. FASTQ retrieval (fastq-dump or SRA API)",
+    "5. FASTQ normalization",
+    "6. Watermark recovery (detectWatermarkInCandidate)",
+    "7. SHA-256 commitment verification",
+    "8. Final classification: verified match / metadata-only / inconclusive"
+  ],
+  "serviceFile": "backend/services/misuseDetectionService.js",
+  "note": "Zero verified matches in the tested search scope is the honest result. This must not be interpreted as proof that no misuse of GenoVault-hosted data has occurred."
+}

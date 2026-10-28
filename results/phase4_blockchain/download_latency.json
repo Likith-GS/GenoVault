@@ -1,0 +1,157 @@
+{
+  "experiment": "download_pipeline_latency",
+  "runAt": "2026-10-14T16:45:04.802Z",
+  "nRuns": 3,
+  "stages": {
+    "10KB": {
+      "fileSizeBytes": 10240,
+      "v1": {
+        "encrypt": {
+          "n": 3,
+          "mean": 0.832,
+          "median": 0.11,
+          "sd": 1.029,
+          "min": 0.099,
+          "max": 2.288,
+          "unit": "ms"
+        },
+        "decrypt": {
+          "n": 3,
+          "mean": 0.115,
+          "median": 0.094,
+          "sd": 0.059,
+          "min": 0.056,
+          "max": 0.196,
+          "unit": "ms"
+        }
+      },
+      "v2": {
+        "encrypt": {
+          "n": 3,
+          "mean": 0.919,
+          "median": 0.217,
+          "sd": 1.031,
+          "min": 0.163,
+          "max": 2.376,
+          "unit": "ms"
+        },
+        "decrypt": {
+          "n": 3,
+          "mean": 0.221,
+          "median": 0.17,
+          "sd": 0.079,
+          "min": 0.16,
+          "max": 0.332,
+          "unit": "ms"
+        }
+      },
+      "overhead": {
+        "encryptMs": 0.087,
+        "decryptMs": 0.106,
+        "acceptableUnder10ms": true
+      }
+    },
+    "100KB": {
+      "fileSizeBytes": 102400,
+      "v1": {
+        "encrypt": {
+          "n": 3,
+          "mean": 1.003,
+          "median": 0.448,
+          "sd": 0.935,
+          "min": 0.241,
+          "max": 2.32,
+          "unit": "ms"
+        },
+        "decrypt": {
+          "n": 3,
+          "mean": 0.292,
+          "median": 0.212,
+          "sd": 0.126,
+          "min": 0.194,
+          "max": 0.469,
+          "unit": "ms"
+        }
+      },
+      "v2": {
+        "encrypt": {
+          "n": 3,
+          "mean": 0.481,
+          "median": 0.481,
+          "sd": 0.046,
+          "min": 0.425,
+          "max": 0.538,
+          "unit": "ms"
+        },
+        "decrypt": {
+          "n": 3,
+          "mean": 0.381,
+          "median": 0.35,
+          "sd": 0.069,
+          "min": 0.316,
+          "max": 0.477,
+          "unit": "ms"
+        }
+      },
+      "overhead": {
+        "encryptMs": -0.522,
+        "decryptMs": 0.089,
+        "acceptableUnder10ms": true
+      }
+    },
+    "1024KB": {
+      "fileSizeBytes": 1048576,
+      "v1": {
+        "encrypt": {
+          "n": 3,
+          "mean": 2.503,
+          "median": 2.537,
+          "sd": 0.235,
+          "min": 2.2,
+          "max": 2.772,
+          "unit": "ms"
+        },
+        "decrypt": {
+          "n": 3,
+          "mean": 2.144,
+          "median": 2.201,
+          "sd": 0.413,
+          "min": 1.612,
+          "max": 2.62,
+          "unit": "ms"
+        }
+      },
+      "v2": {
+        "encrypt": {
+          "n": 3,
+          "mean": 5.774,
+          "median": 5.176,
+          "sd": 1.924,
+          "min": 3.774,
+          "max": 8.371,
+          "unit": "ms"
+        },
+        "decrypt": {
+          "n": 3,
+          "mean": 3.195,
+          "median": 3.171,
+          "sd": 0.044,
+          "min": 3.157,
+          "max": 3.256,
+          "unit": "ms"
+        }
+      },
+      "overhead": {
+        "encryptMs": 3.271,
+        "decryptMs": 1.051,
+        "acceptableUnder10ms": true
+      }
+    }
+  },
+  "notes": [
+    "Plaintexts are randomly generated — no real genomic data.",
+    "V1 = AES-256-CBC. V2 = AES-256-CBC + HMAC-SHA256 (Encrypt-then-MAC).",
+    "Timings use process.hrtime.bigint() (ns resolution).",
+    "Each run: fresh random key + IV."
+  ]
+}

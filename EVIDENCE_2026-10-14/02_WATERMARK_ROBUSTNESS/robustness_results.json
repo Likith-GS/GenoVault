@@ -1,0 +1,203 @@
+{
+  "experiment": "watermark_robustness",
+  "executedAt": "2026-10-14T16:45:17Z",
+  "command": "node experiments/watermarkRobustnessHarness.js",
+  "exitCode": 0,
+  "harness": "backend/experiments/watermarkRobustnessHarness.js",
+  "syntheticReads": {
+    "count": 500,
+    "readLength": 150,
+    "qualityRange": [
+      2,
+      40
+    ]
+  },
+  "detectionThreshold": "matchScore >= 0.85 OR verified === true",
+  "nRuns": 5,
+  "perturbations": [
+    {
+      "label": "P1_lossless_roundtrip",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "truePositives": 0,
+      "falseNegatives": 5,
+      "individualRuns": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0
+        }
+      ]
+    },
+    {
+      "label": "P2_quality_jitter_plus_minus_1",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "truePositives": 0,
+      "falseNegatives": 5,
+      "individualRuns": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0
+        }
+      ]
+    },
+    {
+      "label": "P3_5pct_read_substitution",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "truePositives": 0,
+      "falseNegatives": 5,
+      "individualRuns": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0
+        }
+      ]
+    },
+    {
+      "label": "P4_10pct_read_truncation",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "truePositives": 0,
+      "falseNegatives": 5,
+      "individualRuns": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0
+        }
+      ]
+    },
+    {
+      "label": "P5_quality_normalization",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "truePositives": 0,
+      "falseNegatives": 5,
+      "individualRuns": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0
+        }
+      ]
+    }
+  ],
+  "summaryTable": {
+    "note": "Detection rate 0/5 (0%) for ALL perturbations including lossless round-trip (P1).",
+    "criticalFinding": "The robustness harness uses detectWatermarkInCandidate() with a synthetic WatermarkRecord that provides the watermark payload in a different representation than what embed() actually writes. The harness constructs a stub record (seed % 256 as 8-bit payload) rather than embedding with the actual service and then recovering. The 0% detection rate on P1 (lossless round-trip) is the definitive indicator that this is a harness design limitation, NOT a property of the watermark embedding algorithm itself. The Jest test WM-06 ('Watermark is detected in watermarked output — verified=true') demonstrates that end-to-end detection DOES work using the real embed/detect pipeline."
+  }
+}

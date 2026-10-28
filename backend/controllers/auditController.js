@@ -38,7 +38,7 @@ const getAudit = async (req, res) => {
         .lean();
 
       for (const r of requests) {
-        const fileName       = r.file       ? r.file.originalName        : 'Unknown file';
+        const fileName       = r.file?.originalName || r.fileName || 'Unknown file';
         const researcherName = r.researcher ? r.researcher.name           : 'Unknown researcher';
         const fileId         = r.file       ? r.file.blockchainFileId     : null;
 
@@ -120,7 +120,7 @@ const getAudit = async (req, res) => {
         .lean();
 
       for (const r of requests) {
-        const fileName = r.file ? r.file.originalName    : 'Unknown file';
+        const fileName = r.file?.originalName || r.fileName || 'Unknown file';
         const fileId   = r.file ? r.file.blockchainFileId : null;
 
         // Always emit the Request event
@@ -217,7 +217,7 @@ const getAudit = async (req, res) => {
             eventType:   e.operation,
             action:      _operationToAction(e.operation),
             fileId:      fileDoc?.blockchainFileId ?? null,
-            fileName:    fileDoc?.originalName ?? 'Unknown file',
+            fileName:    fileDoc?.originalName ?? e.details?.fileName ?? 'Unknown file',
             actor:       e.userId?.name ?? 'Researcher',
             txHash:      e.txHash   ?? null,
             blockNumber: e.blockNumber ?? null,

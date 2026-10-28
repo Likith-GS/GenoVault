@@ -11,7 +11,9 @@ const {
   previewFile,
   deleteFile,
   retryIpfs,
+  retryEncryption,
 } = require("../controllers/fileController");
+
 
 /**
  * File Routes — base path: /api/files
@@ -44,6 +46,10 @@ router.get("/:id/ipfs-status", protect, requireRole("owner"), getIpfsStatus);
 
 // Retry a failed IPFS backup
 router.post("/:id/retry-ipfs", protect, requireRole("owner"), retryIpfs);
+
+// Retry encryption + blockchain registration for a stuck file (isEncrypted=false / no blockchainFileHash)
+// After this completes, Re-verify will perform the live SHA-256 vs blockchain hash comparison
+router.post("/:id/retry-encryption", protect, requireRole("owner"), retryEncryption);
 
 // Delete a file from Azure Blob Storage, Filebase IPFS, and MongoDB
 router.delete("/:id", protect, requireRole("owner"), deleteFile);

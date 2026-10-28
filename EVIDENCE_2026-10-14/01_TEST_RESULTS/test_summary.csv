@@ -1,0 +1,6 @@
+suite,phase,total_tests,passed,failed,skipped
+"encryption.test.js","Phase 2 — Encrypt-then-MAC (R3.2)",8,8,0,0
+"identity.test.js","Phase 1 — Identity Versioning (R3.1)",7,7,0,0
+"integrity.test.js","Phase 5 — Integrity Categories (R3.4)",10,10,0,0
+"watermark.test.js","Tests 1–14/15/16–26/27–29",29,29,0,0
+"TOTAL","All suites",54,54,0,0

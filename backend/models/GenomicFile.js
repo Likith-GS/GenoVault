@@ -91,6 +91,26 @@ const genomicFileSchema = new mongoose.Schema(
       select: false, // Not returned by default — only fetched during decryption
     },
 
+    // ── Encryption versioning (R3.2) ───────────────────────────
+    // v1 = AES-256-CBC only (no MAC) — all existing files
+    // v2 = AES-256-CBC + HMAC-SHA256 Encrypt-then-MAC — new uploads
+    // Existing documents without this field are implicitly v1.
+    encryptionVersion: {
+      type: String,
+      enum: ["v1", "v2"],
+      default: "v1",
+    },
+
+    // HMAC-SHA256 authentication tag for V2 files (Encrypt-then-MAC).
+    // MAC covers: IV || ciphertext.
+    // MAC key is HKDF-derived from the encryption key — not stored here.
+    // select:false — never returned in normal queries, only fetched during download.
+    encryptionMac: {
+      type: String, // 64-char hex (32 bytes / 256-bit)
+      default: null,
+      select: false,
+    },
+
     // ── Upload metadata ────────────────────────────────────────
     uploadStatus: {
       type: String,
@@ -185,6 +205,14 @@ const genomicFileSchema = new mongoose.Schema(
 
     // SHA-256 hex of the ENCRYPTED blob (stored on-chain)
     blockchainFileHash: {
+      type: String,
+      default: null,
+    },
+
+    // SHA-256 hex of the RAW uploaded blob — computed at confirm-upload time,
+    // before encryption. Used by the integrity SHA layer as a baseline hash
+    // so verification always runs even if blockchain registration hasn't completed.
+    uploadSha256Hash: {
       type: String,
       default: null,
     },

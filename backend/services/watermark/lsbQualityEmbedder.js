@@ -1,4 +1,4 @@
-/**
+   /**
  * lsbQualityEmbedder.js
  * ──────────────────────────────────────────────────────────────────
  * FASTQ Quality-Score LSB Watermarking — GENOMIC_LSB_V1
@@ -30,6 +30,18 @@
 "use strict";
 
 const crypto = require("crypto");
+const zlib   = require("zlib");
+const { promisify } = require("util");
+
+const gunzipAsync = promisify(zlib.gunzip);
+const gzipAsync   = promisify(zlib.gzip);
+
+// ── Gzip helpers ─────────────────────────────────────────────────
+
+/** Returns true if buffer starts with gzip magic bytes 0x1F 0x8B */
+function isGzip(buf) {
+  return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+}
 
 // ── Constants (V1 defaults — overridden by embeddingParametersVersion) ──
 const V1_PAYLOAD_BITS        = 64;
@@ -46,15 +58,22 @@ const V1_REDUNDANCY_FACTOR   = 2;
 /**
  * normalizeFASTQ(buffer)
  * Parses a FASTQ buffer into an array of read objects.
+ * Auto-decompresses gzip input (.fastq.gz) before parsing.
  * Handles Unix and Windows line endings.
- * Returns an array of: { header, sequence, plus, quality }
- * Throws if the buffer is not valid FASTQ structure.
  *
- * @param {Buffer} buffer
- * @returns {{ header: string, sequence: string, plus: string, quality: string }[]}
+ * READ-ORDER INDEPENDENCE: Reads are sorted by their read ID (header after '@'
+ * up to first whitespace). This makes watermark positions identical regardless
+ * of read order — essential for NCBI SRA detection since fasterq-dump returns
+ * reads sorted by read name, not original submission order.
+ *
+ * @param {Buffer} buffer  – raw FASTQ or gzip-compressed FASTQ
+ * @returns {{ header: string, sequence: string, plus: string, quality: string, readId: string }[]}
  */
 function normalizeFASTQ(buffer) {
-  const text  = buffer.toString("utf8");
+  // Auto-decompress gzip — synchronous path using zlib.gunzipSync
+  const rawBuf = isGzip(buffer) ? zlib.gunzipSync(buffer) : buffer;
+
+  const text  = rawBuf.toString("utf8");
   const lines = text.split(/\r?\n/);
 
   const reads = [];
@@ -88,13 +107,19 @@ function normalizeFASTQ(buffer) {
       );
     }
 
-    reads.push({ header, sequence, plus, quality });
+    // Extract read ID: everything after '@' up to first whitespace
+    const readId = header.slice(1).split(/\s/)[0];
+    reads.push({ header, sequence, plus, quality, readId });
     i += 4;
   }
 
   if (reads.length === 0) {
     throw new Error("FASTQ buffer contains no valid reads");
   }
+
+  // Sort by readId — ensures watermark positions are identical regardless
+  // of what order NCBI SRA / fasterq-dump returns reads in
+  reads.sort((a, b) => (a.readId < b.readId ? -1 : a.readId > b.readId ? 1 : 0));
 
   return reads;
 }
@@ -130,10 +155,7 @@ function serializeFASTQ(reads) {
  * @returns {{ readIdx: number, charIdx: number }[]}  length = encodedBits
  */
 function selectEmbeddingPositions(reads, watermarkSeed, secret, params) {
-  const encodedBits       = params.encodedBits        || V1_ENCODED_BITS;
-  const minQualityAscii   = params.minQualityThreshold !== undefined
-    ? params.minQualityThreshold + 33   // Phred offset → ASCII
-    : V1_MIN_QUALITY_ASCII;
+  const encodedBits    = params.encodedBits || V1_ENCODED_BITS;
 
   const positions  = [];
   const usedSet    = new Set();   // "readIdx:charIdx" — avoid collisions
@@ -141,25 +163,28 @@ function selectEmbeddingPositions(reads, watermarkSeed, secret, params) {
   const maxAttempts = encodedBits * 200; // safety cap
 
   while (positions.length < encodedBits && counter < maxAttempts) {
-    // Generate 4 bytes of pseudo-random data via HMAC counter
-    const ctrBuf   = Buffer.alloc(4);
+    const ctrBuf = Buffer.alloc(4);
     ctrBuf.writeUInt32BE(counter, 0);
-    const hmac     = crypto.createHmac("sha256", secret);
+    const hmac   = crypto.createHmac("sha256", secret);
     hmac.update(Buffer.from(watermarkSeed, "hex"));
     hmac.update(ctrBuf);
-    const digest   = hmac.digest();
+    const digest = hmac.digest();   // 32 bytes
 
-    // Map 4-byte groups to (readIdx, charIdx)
-    const readIdx  = digest.readUInt32BE(0) % reads.length;
-    const qualLen  = reads[readIdx].quality.length;
+    // Bytes 0-3 → readIdx, bytes 4-7 → charIdx (independent regions)
+    const readIdx = digest.readUInt32BE(0) % reads.length;
+    const qualLen = reads[readIdx].quality.length;
 
     if (qualLen === 0) { counter++; continue; }
 
-    const charIdx  = digest.readUInt32BE(4 % digest.length) % qualLen;
-    const qualCode = reads[readIdx].quality.charCodeAt(charIdx);
-    const key      = `${readIdx}:${charIdx}`;
+    const charIdx = digest.readUInt32BE(4) % qualLen;
+    const key     = `${readIdx}:${charIdx}`;
 
-    if (qualCode >= minQualityAscii && !usedSet.has(key)) {
+    // NOTE: No quality-threshold filter here — filtering by quality value
+    // causes embed/detect divergence because LSB flipping can push a
+    // boundary-quality score (e.g. ASCII 43 → 42) below the threshold,
+    // making the detect pass skip that position and produce a different
+    // position array than the embed pass. Positions are purely coordinate-based.
+    if (!usedSet.has(key)) {
       positions.push({ readIdx, charIdx });
       usedSet.add(key);
     }
@@ -176,6 +201,7 @@ function selectEmbeddingPositions(reads, watermarkSeed, secret, params) {
 
   return positions;
 }
+
 
 // ─────────────────────────────────────────────────────────────────
 // Error-Correction Codec (Repetition Code N=7)
@@ -283,6 +309,8 @@ function embed(fastqBuffer, watermarkRecord) {
   }
 
   // Parse and embed
+  const isCompressed = isGzip(fastqBuffer);
+  // normalizeFASTQ auto-decompresses, so pass buffer directly
   const reads     = normalizeFASTQ(fastqBuffer);
   const positions = selectEmbeddingPositions(
     reads,
@@ -310,8 +338,14 @@ function embed(fastqBuffer, watermarkRecord) {
     };
   }
 
-  const watermarkedBuffer = serializeFASTQ(modifiedReads);
-  return { watermarkedBuffer };
+  let watermarkedBuffer = serializeFASTQ(modifiedReads);
+
+  // Re-compress if input was gzip — deliver .fastq.gz as .fastq.gz
+  if (isCompressed) {
+    watermarkedBuffer = zlib.gzipSync(watermarkedBuffer);
+  }
+
+  return { watermarkedBuffer, wasCompressed: isCompressed };
 }
 
 /**

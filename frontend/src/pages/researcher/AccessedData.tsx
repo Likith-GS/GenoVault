@@ -106,33 +106,66 @@ function AccessCard({ access, token, onExpired }: {
         throw new Error(msg);
       }
 
-      // ── Streaming download with progress ─────────────────────────────
       const contentLength = Number(res.headers.get("Content-Length") ?? 0);
-      const reader        = res.body!.getReader();
-      const chunks: Uint8Array[] = [];
-      let   received = 0;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        if (contentLength > 0) {
-          setDlProgress(Math.round((received / contentLength) * 100));
+      // ── Stream directly to disk (no 500MB RAM buffer) ─────────────────
+      // Uses File System Access API (Chrome 86+, Edge 86+).
+      // Falls back to Blob+createObjectURL for other browsers.
+      if ("showSaveFilePicker" in window) {
+        let fileHandle: FileSystemFileHandle;
+        try {
+          fileHandle = await (window as any).showSaveFilePicker({
+            suggestedName: access.file.originalName,
+            types: [{
+              description: "Genomic File",
+              accept: { "application/octet-stream": [".bam", ".fastq", ".vcf", ".gz"] },
+            }],
+          });
+        } catch (pickerErr: any) {
+          // User cancelled the save dialog — abort cleanly
+          if (pickerErr.name === "AbortError") { setDownloading(false); return; }
+          throw pickerErr;
         }
-      }
 
-      // Merge chunks → Blob → anchor click
-      const blob = new Blob(chunks);
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = access.file.originalName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success(`✅ ${access.file.originalName} downloaded!`);
+        const writable = await (fileHandle as any).createWritable();
+        const reader   = res.body!.getReader();
+        let received   = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await writable.write(value);
+          received += value.length;
+          if (contentLength > 0) setDlProgress(Math.round((received / contentLength) * 100));
+        }
+        await writable.close();
+        toast.success(`✅ ${access.file.originalName} saved to disk!`);
+
+      } else {
+        // ── Fallback: buffer in memory then trigger anchor click ──────────
+        const reader = res.body!.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (contentLength > 0) setDlProgress(Math.round((received / contentLength) * 100));
+        }
+
+        const blob = new Blob(chunks);
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href     = url;
+        a.download = access.file.originalName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast.success(`✅ ${access.file.originalName} downloaded!`);
+      }
     } catch (e: any) {
       toast.error(e.message || "Download failed");
     } finally {
@@ -140,6 +173,7 @@ function AccessCard({ access, token, onExpired }: {
       setDlProgress(0);
     }
   };
+
 
   return (
     <motion.div

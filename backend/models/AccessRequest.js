@@ -21,6 +21,12 @@ const accessRequestSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Denormalized file name — preserved even if the file is deleted
+    fileName: {
+      type:    String,
+      default: null,
+    },
+
     // The researcher who sent the request
     researcher: {
       type: mongoose.Schema.Types.ObjectId,
@@ -125,6 +131,20 @@ const accessRequestSchema = new mongoose.Schema(
       index: true,
     },
 
+    // ── Identity versioning (R3.1) ─────────────────────────────────────────
+    // Tracks which ORCID→bytes32 derivation was used for this request's
+    // on-chain researcher identifier:
+    //   v1 = keccak256(ORCID)            — legacy, used for all existing records
+    //   v2 = HMAC-SHA256(secret, ORCID)  — keyed pseudonymous derivation (current)
+    // Existing documents without this field are implicitly v1.
+    // The smart contract stores bytes32 identifiers and has no concept of
+    // identity versioning — this field is for application-level tracking only.
+    identityVersion: {
+      type: String,
+      enum: ["v1", "v2"],
+      default: "v2",
+    },
+
     // When the owner approved (null until approved)
     approvedAt: {
       type: Date,
@@ -137,34 +157,68 @@ const accessRequestSchema = new mongoose.Schema(
       default: null,
     },
 
-    // ── Blockchain receipt fields (populated after each tx) ────────────────
+    // ── Blockchain receipt fields + per-transition status (R2.3) ──────────
+    //
+    // Two independent state machines:
+    //   Application state  (status field above): PENDING | APPROVED | REJECTED | REVOKED
+    //   Blockchain state   (*BlockchainStatus):  not_submitted | submitted | confirmed | failed
+    //
+    // These are INDEPENDENT. Examples:
+    //   status=APPROVED, approveBlockchainStatus=CONFIRMED → fully verified approval
+    //   status=APPROVED, approveBlockchainStatus=FAILED    → approved in app, tx failed on-chain
+    //   status=APPROVED, approveBlockchainStatus=SUBMITTED → approved, tx in flight
+    //
+    // The download authorization policy reads BOTH fields. This separation
+    // makes the MongoDB/blockchain relationship explicit and auditable.
+    // Existing documents without *BlockchainStatus implicitly = 'not_submitted'.
+
     // Request transaction (AccessRequested event)
-    requestTxHash:         { type: String, default: null },
-    requestBlockNumber:    { type: Number, default: null },
-    requestGasUsed:        { type: String, default: null },
-    requestTxStatus:       { type: String, default: null },
-    requestEtherscanUrl:   { type: String, default: null },
+    requestTxHash:            { type: String, default: null },
+    requestBlockNumber:       { type: Number, default: null },
+    requestGasUsed:           { type: String, default: null },
+    requestTxStatus:          { type: String, default: null },
+    requestEtherscanUrl:      { type: String, default: null },
+    requestBlockchainStatus:  {
+      type: String,
+      enum: ["not_submitted", "submitted", "confirmed", "failed"],
+      default: "not_submitted",
+    },
 
     // Approval transaction (AccessApproved event)
-    approveTxHash:         { type: String, default: null },
-    approveBlockNumber:    { type: Number, default: null },
-    approveGasUsed:        { type: String, default: null },
-    approveTxStatus:       { type: String, default: null },
-    approveEtherscanUrl:   { type: String, default: null },
+    approveTxHash:            { type: String, default: null },
+    approveBlockNumber:       { type: Number, default: null },
+    approveGasUsed:           { type: String, default: null },
+    approveTxStatus:          { type: String, default: null },
+    approveEtherscanUrl:      { type: String, default: null },
+    approveBlockchainStatus:  {
+      type: String,
+      enum: ["not_submitted", "submitted", "confirmed", "failed"],
+      default: "not_submitted",
+    },
 
     // Rejection transaction (AccessRejected event)
-    rejectTxHash:          { type: String, default: null },
-    rejectBlockNumber:     { type: Number, default: null },
-    rejectGasUsed:         { type: String, default: null },
-    rejectTxStatus:        { type: String, default: null },
-    rejectEtherscanUrl:    { type: String, default: null },
+    rejectTxHash:             { type: String, default: null },
+    rejectBlockNumber:        { type: Number, default: null },
+    rejectGasUsed:            { type: String, default: null },
+    rejectTxStatus:           { type: String, default: null },
+    rejectEtherscanUrl:       { type: String, default: null },
+    rejectBlockchainStatus:   {
+      type: String,
+      enum: ["not_submitted", "submitted", "confirmed", "failed"],
+      default: "not_submitted",
+    },
 
     // Revocation transaction (AccessRevoked event)
-    revokeTxHash:          { type: String, default: null },
-    revokeBlockNumber:     { type: Number, default: null },
-    revokeGasUsed:         { type: String, default: null },
-    revokeTxStatus:        { type: String, default: null },
-    revokeEtherscanUrl:    { type: String, default: null },
+    revokeTxHash:             { type: String, default: null },
+    revokeBlockNumber:        { type: Number, default: null },
+    revokeGasUsed:            { type: String, default: null },
+    revokeTxStatus:           { type: String, default: null },
+    revokeEtherscanUrl:       { type: String, default: null },
+    revokeBlockchainStatus:   {
+      type: String,
+      enum: ["not_submitted", "submitted", "confirmed", "failed"],
+      default: "not_submitted",
+    },
   },
   {
     timestamps: true,

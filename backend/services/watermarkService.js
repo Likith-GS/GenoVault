@@ -170,6 +170,7 @@ function computeWatermarkedFileHash(watermarkedBuffer) {
 function embedWatermark(plainBuffer, fileExt, watermarkRecord) {
   switch (fileExt.toLowerCase()) {
     case ".fastq":
+    case ".fastq.gz":   // gzip-compressed FASTQ — lsbEmbedder auto-decompresses
       return lsbEmbedder.embed(plainBuffer, watermarkRecord);
 
     case ".bam":
@@ -286,7 +287,7 @@ function buildWatermarkRecord(opts) {
   const watermarkPayload    = deriveWatermarkPayload(watermarkSeed);
   const watermarkCommitment = computeWatermarkCommitment(watermarkPayload);
 
-  const isFASTQ        = fileExt.toLowerCase() === ".fastq";
+  const isFASTQ        = [".fastq", ".fastq.gz"].includes(fileExt.toLowerCase());
   const embeddingMethod = isFASTQ ? "LSB_QUALITY"
     : fileExt.toLowerCase() === ".bam" ? "SAM_TAG"
     : "COMMENT_FIELD";

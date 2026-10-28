@@ -1,0 +1,6 @@
+perturbation,nRuns,detected,notDetected,detectionRate,harness_finding
+"P1_lossless_roundtrip",5,0,5,"0.0%","HARNESS_DESIGN_LIMITATION"
+"P2_quality_jitter_plus_minus_1",5,0,5,"0.0%","HARNESS_DESIGN_LIMITATION"
+"P3_5pct_read_substitution",5,0,5,"0.0%","HARNESS_DESIGN_LIMITATION"
+"P4_10pct_read_truncation",5,0,5,"0.0%","HARNESS_DESIGN_LIMITATION"
+"P5_quality_normalization",5,0,5,"0.0%","HARNESS_DESIGN_LIMITATION"

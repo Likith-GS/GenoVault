@@ -1,0 +1,27 @@
+{
+  "experiment": "blockchain_gas_and_latency",
+  "status": "BLOCKED",
+  "executedAt": "2026-10-14T16:43:00Z",
+  "network": "Ethereum Sepolia Testnet",
+  "chainId": 11155111,
+  "reason": "The blockchainBenchmark.js script explicitly checks isBlockchainConfigured() and exits with an error if PRIVATE_KEY, BLOCKCHAIN_RPC_URL, or BLOCKCHAIN_CONTRACT_ADDRESS are not configured or if the wallet has insufficient Sepolia ETH. Submitting real blockchain transactions requires explicit user approval (Mandatory Rule 12).",
+  "prerequisites": [
+    "PRIVATE_KEY — funded Sepolia wallet private key",
+    "BLOCKCHAIN_RPC_URL — live Alchemy/Infura Sepolia RPC endpoint",
+    "BLOCKCHAIN_CONTRACT_ADDRESS — deployed GenoVault contract address",
+    "Minimum ~0.01 SepoliaETH for N=3 registerFile transactions",
+    "Explicit user approval to submit live testnet transactions"
+  ],
+  "scriptAvailable": "backend/experiments/blockchainBenchmark.js",
+  "operationsCovered": [
+    "registerFile (write)",
+    "verifyFileHashOnChain (read)"
+  ],
+  "operationsNotInScript": [
+    "requestAccess",
+    "approveAccess",
+    "rejectAccess",
+    "revokeAccess"
+  ],
+  "note": "Gas usage estimates from contract ABI exist but actual gas_used from receipts requires live transaction execution. Nominal Sepolia block time is ~12 seconds; actual confirmation latency depends on network congestion and must not be inferred from block time."
+}

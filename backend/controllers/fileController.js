@@ -33,15 +33,34 @@ const {
   getBlobProperties,
   downloadBlobToBuffer,
   uploadEncryptedBuffer,
+  getReadableBlobStream,
 } = require("../services/azureService");
 
 const { uploadToIPFS, deleteFromIPFS }   = require("../services/ipfsService");
-const { generateKey, generateIV, encryptBuffer, decryptPartialBuffer } = require("../services/encryptionService");
+const {
+  generateKey,
+  generateIV,
+  encryptBuffer,
+  encryptBufferV2,
+  decryptPartialBuffer,
+} = require("../services/encryptionService");
 const { storeEncryptionKey, deleteEncryptionKey } = require("../services/keyVaultService");
 const { registerFileOnChain }            = require("../services/blockchainService");
 
 // ── Allowed genomic file extensions ─────────────────────────────────────
-const ALLOWED_EXTENSIONS = new Set([".fastq", ".bam", ".vcf"]);
+const ALLOWED_EXTENSIONS = new Set([".fastq", ".fastq.gz", ".bam", ".vcf"]);
+
+/**
+ * getFileExt(filename)
+ * Returns the full file extension, handling compound extensions like .fastq.gz.
+ * path.extname("file.fastq.gz") returns ".gz" — this returns ".fastq.gz".
+ */
+function getFileExt(filename) {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".fastq.gz"))  return ".fastq.gz";
+  if (lower.endsWith(".tar.gz"))    return ".tar.gz";
+  return path.extname(filename).toLowerCase();
+}
 
 /**
  * generateSafeBlobName
@@ -50,7 +69,7 @@ const ALLOWED_EXTENSIONS = new Set([".fastq", ".bam", ".vcf"]);
  * Format: <timestamp>_<uuid12>.<ext>
  */
 const generateSafeBlobName = (originalName) => {
-  const ext       = path.extname(originalName).toLowerCase();
+  const ext       = getFileExt(originalName);
   const timestamp = Date.now();
   const unique    = uuidv4().replace(/-/g, "").slice(0, 12);
   return `${timestamp}_${unique}${ext}`;
@@ -62,10 +81,10 @@ const generateSafeBlobName = (originalName) => {
    Runs AFTER confirmUpload has already responded to the client.
    Steps:
      1. Download plaintext blob from Azure
-     2. Encrypt with AES-256-CBC
+     2. Encrypt with AES-256-CBC + HMAC-SHA256 (Encrypt-then-MAC, V2)
      3. Overwrite blob with ciphertext
      4. Store AES key in Azure Key Vault
-     5. Update MongoDB (isEncrypted = true, encryptionIv)
+     5. Update MongoDB (isEncrypted, encryptionIv, encryptionVersion:'v2', encryptionMac)
      6. Compute SHA-256 of the encrypted blob → register on blockchain
      7. Start IPFS backup of encrypted blob
 ────────────────────────────────────────────────────────────────────────────*/
@@ -77,9 +96,13 @@ const runBackgroundEncryptAndBackup = async (fileId, blobName, originalName, mim
     console.log(`[Encrypt] ⏳ Downloading blob for encryption: ${blobName}`);
     const plainBuffer = await downloadBlobToBuffer(blobName);
 
-    const aesKeyHex   = generateKey();
-    const ivHex       = generateIV();
-    encryptedBuffer   = encryptBuffer(plainBuffer, aesKeyHex, ivHex);
+    const aesKeyHex = generateKey();
+    const ivHex      = generateIV();
+
+    // V2: AES-256-CBC + HMAC-SHA256 Encrypt-then-MAC
+    // encryptBufferV2 returns { ciphertext, mac } where mac covers IV||ciphertext.
+    const { ciphertext: encryptedBuffer_, mac: encryptionMac } = encryptBufferV2(plainBuffer, aesKeyHex, ivHex);
+    encryptedBuffer = encryptedBuffer_;
 
     console.log(`[Encrypt] 🔐 Re-uploading encrypted blob (${encryptedBuffer.length} bytes)`);
     await uploadEncryptedBuffer(blobName, encryptedBuffer, mimeType);
@@ -88,41 +111,58 @@ const runBackgroundEncryptAndBackup = async (fileId, blobName, originalName, mim
     console.log(`[KeyVault] ✅ AES key stored for file: ${fileId}`);
 
     await GenomicFile.findByIdAndUpdate(fileId, {
-      isEncrypted:  true,
-      encryptionIv: ivHex,
+      isEncrypted:       true,
+      encryptionIv:      ivHex,
+      encryptionVersion: "v2",
+      encryptionMac:     encryptionMac,
     });
-    console.log(`[Encrypt] ✅ Encryption complete: ${blobName}`);
+    console.log(`[Encrypt] ✅ V2 Encrypt-then-MAC complete: ${blobName}`);
   } catch (encErr) {
     console.error(`[Encrypt] ❌ Encryption failed for ${blobName}:`, encErr.message);
   }
 
-  // ── Phase 2: Blockchain registration ──────────────────────────────────
-  // Compute SHA-256 of the encrypted blob and register on Sepolia blockchain.
+  // ── Phase 2: SHA-256 hash + Blockchain registration ──────────────────
+  // Compute SHA-256 of the encrypted blob.
+  // The hash is ALWAYS stored in MongoDB as blockchainFileHash so the
+  // integrity SHA layer can compare it against the live Azure blob on
+  // every Re-verify, even when blockchain registration is disabled or fails.
   let sha256hex = null;
   try {
     const dataToHash = encryptedBuffer || Buffer.from(blobName);
     sha256hex        = crypto.createHash("sha256").update(dataToHash).digest("hex");
 
-    console.log(`[Blockchain] ⏳ Registering file on Sepolia: ${sha256hex.slice(0, 16)}…`);
+    // ── Always persist the hash immediately ─────────────────────────────
+    // This is the off-chain stored hash used by the SHA-256 integrity layer.
+    // Blockchain registration below is independent — it anchors this hash
+    // on Sepolia but the comparison works with or without it.
+    await GenomicFile.findByIdAndUpdate(fileId, {
+      blockchainFileHash: sha256hex,
+    });
+    console.log(`[SHA256] ✅ Hash stored: ${sha256hex.slice(0, 16)}… (off-chain baseline)`);
+
+    // ── Attempt on-chain registration (Sepolia) ──────────────────────────
+    console.log(`[Blockchain] ⏳ Registering on Sepolia: ${sha256hex.slice(0, 16)}…`);
     const bcResult = await registerFileOnChain(sha256hex, "");
 
     if (bcResult.disabled) {
-      console.warn(`[Blockchain] ⚠️  Skipped (not configured): ${blobName}`);
+      console.warn(`[Blockchain] ⚠️  Skipped (not configured) — hash still stored off-chain`);
     } else if (bcResult.success) {
+      // Supplement the record with on-chain metadata
       await GenomicFile.findByIdAndUpdate(fileId, {
         blockchainFileId:    bcResult.fileId,
         blockchainTxHash:    bcResult.txHash,
         blockchainBlockNum:  bcResult.blockNumber,
-        blockchainFileHash:  sha256hex,
         blockchainTimestamp: new Date(),
       });
       console.log(`[Blockchain] ✅ fileId=${bcResult.fileId} | Tx: ${bcResult.txHash} | Block: ${bcResult.blockNumber}`);
     } else {
-      console.warn(`[Blockchain] ⚠️  Registration failed: ${bcResult.error}`);
+      console.warn(`[Blockchain] ⚠️  Registration failed: ${bcResult.error} — hash still stored off-chain`);
     }
   } catch (bcErr) {
-    console.error(`[Blockchain] ❌ Exception during registration:`, bcErr.message);
+    console.error(`[Blockchain] ❌ Exception:`, bcErr.message);
+    // Even if an exception occurs, sha256hex may already be stored — do not wipe it.
   }
+
 
   // ── Phase 3: IPFS backup ──────────────────────────────────────────────
   // Pass encryptedBuffer directly — skips a full Azure re-download (~500 MB saved).
@@ -143,6 +183,62 @@ const runBackgroundEncryptAndBackup = async (fileId, blobName, originalName, mim
   } catch (ipfsErr) {
     console.error(`[IPFS] ❌ Backup failed for ${blobName}:`, ipfsErr.message);
     await GenomicFile.findByIdAndUpdate(fileId, { ipfsStatus: "failed" });
+  }
+};
+
+/* ──────────────────────────────────────────────────────────────────────────
+   POST /api/files/:id/retry-encryption
+   Protected – owner role only
+
+   Re-runs the full background job for a file stuck with isEncrypted=false
+   or missing blockchainFileHash (i.e. the job previously failed silently).
+
+   Flow:
+     1. Validate file ownership and state
+     2. Re-run runBackgroundEncryptAndBackup (encrypt → Key Vault → SHA-256
+        → blockchain → IPFS)
+     3. Return immediately — progress visible via GET /:id/ipfs-status
+────────────────────────────────────────────────────────────────────────────*/
+const retryEncryption = async (req, res) => {
+  try {
+    const fileId  = req.params.id;
+    const ownerId = req.user.userId;
+
+    const file = await GenomicFile.findById(fileId);
+    if (!file || file.uploadStatus !== "confirmed") {
+      return res.status(404).json({ success: false, message: "File not found" });
+    }
+    if (String(file.owner) !== String(ownerId)) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+    if (file.isEncrypted && file.blockchainFileHash) {
+      return res.status(400).json({
+        success: false,
+        message: "File is already encrypted and registered on blockchain — no retry needed",
+      });
+    }
+
+    console.log(`[retryEncryption] 🔄 Retrying background job for file: ${fileId}`);
+
+    // Re-run the full pipeline asynchronously — respond immediately
+    setImmediate(() =>
+      runBackgroundEncryptAndBackup(
+        file._id,
+        file.azureBlobName,
+        file.originalName,
+        file.mimeType,
+        file.sizeBytes,
+      )
+    );
+
+    return res.status(202).json({
+      success: true,
+      message: "Encryption and blockchain registration restarted in background. Use GET /:id/ipfs-status to track progress.",
+      fileId: String(file._id),
+    });
+  } catch (err) {
+    console.error("[retryEncryption]", err);
+    return res.status(500).json({ success: false, message: "Retry failed" });
   }
 };
 
@@ -169,11 +265,11 @@ const getUploadUrl = async (req, res) => {
       return res.status(400).json({ success: false, message: "filesize must be a positive number (bytes)" });
     }
 
-    const ext = path.extname(filename).toLowerCase();
+    const ext = getFileExt(filename);
     if (!ALLOWED_EXTENSIONS.has(ext)) {
       return res.status(400).json({
         success: false,
-        message: `File type "${ext}" is not allowed. Accepted: .fastq, .bam, .vcf`,
+        message: `File type "${ext}" is not allowed. Accepted: .fastq, .fastq.gz, .bam, .vcf`,
       });
     }
 
@@ -223,9 +319,9 @@ const confirmUpload = async (req, res) => {
       return res.status(400).json({ success: false, message: "blobName and originalName are required" });
     }
 
-    const ext = path.extname(originalName).toLowerCase();
+    const ext = getFileExt(originalName);
     if (!ALLOWED_EXTENSIONS.has(ext)) {
-      return res.status(400).json({ success: false, message: `File type "${ext}" is not allowed` });
+      return res.status(400).json({ success: false, message: `File type "${ext}" is not allowed. Accepted: .fastq, .fastq.gz, .bam, .vcf` });
     }
 
     // Verify the blob actually exists in Azure
@@ -253,6 +349,24 @@ const confirmUpload = async (req, res) => {
     // Auto-generate dataset ID: GV-XXXX (unique 4-digit-ish number from timestamp)
     const datasetId = `GV-${(Date.now() % 9000 + 1000).toString().padStart(4, "0")}`;
 
+    // Compute SHA-256 of the raw uploaded blob (streaming — no full buffer in RAM).
+    // Stored as uploadSha256Hash so the integrity SHA layer can always run a
+    // live hash comparison even if blockchain registration hasn't completed yet.
+    let uploadSha256Hash = null;
+    try {
+      const rawStream  = await getReadableBlobStream(blobName);
+      const hashCalc   = crypto.createHash("sha256");
+      await new Promise((resolve, reject) => {
+        rawStream.on("data",  (chunk) => hashCalc.update(chunk));
+        rawStream.on("end",   resolve);
+        rawStream.on("error", reject);
+      });
+      uploadSha256Hash = hashCalc.digest("hex");
+      console.log(`[ConfirmUpload] SHA-256 of raw blob: ${uploadSha256Hash.slice(0, 16)}…`);
+    } catch (hashErr) {
+      console.warn(`[ConfirmUpload] SHA-256 pre-compute failed (non-fatal): ${hashErr.message}`);
+    }
+
     // Save metadata immediately (isEncrypted starts false — background job sets it true)
     const genomicFile = await GenomicFile.create({
       owner:              userId,
@@ -264,6 +378,7 @@ const confirmUpload = async (req, res) => {
       azureBlobName:      blobName,
       azureContainerName: containerName,
       cloudUrl,
+      uploadSha256Hash,
       isEncrypted:        false,
       ipfsStatus:         "pending",
       description:        description || "",
@@ -561,4 +676,5 @@ const getPublicFiles = async (req, res) => {
   }
 };
 
-module.exports = { getUploadUrl, confirmUpload, getMyFiles, getIpfsStatus, previewFile, deleteFile, retryIpfs, getPublicFiles };
+module.exports = { getUploadUrl, confirmUpload, getMyFiles, getIpfsStatus, previewFile, deleteFile, retryIpfs, getPublicFiles, retryEncryption };
+

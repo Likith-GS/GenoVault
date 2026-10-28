@@ -87,6 +87,31 @@ const misuseEventSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ── Misuse classification (R3.5) ──────────────────────────────────────
+    // Explicitly classifies the nature of the detected misuse.
+    // Derived by classifyMisuseEvent() in misuseDetectionService.js.
+    // Null for legacy events created before this field was introduced.
+    //
+    // Categories:
+    //   UNAUTHORIZED_REDISTRIBUTION  — data shared publicly without permission
+    //   POST_REVOCATION_USE          — used after access was revoked
+    //   EXPIRED_ACCESS_USE           — used after access grant expired
+    //   POLICY_VIOLATION             — access outside agreed scope
+    //   SUSPECTED_LEAK               — watermark found in non-approved channel
+    //   UNCLASSIFIED                 — match confirmed but type cannot be determined
+    misuseType: {
+      type: String,
+      enum: [
+        "UNAUTHORIZED_REDISTRIBUTION",
+        "POST_REVOCATION_USE",
+        "EXPIRED_ACCESS_USE",
+        "POLICY_VIOLATION",
+        "SUSPECTED_LEAK",
+        "UNCLASSIFIED",
+      ],
+      default: null,
+    },
+
     // ── Detection metrics ─────────────────────────────────────────
     detectionMethod: {
       type: String,

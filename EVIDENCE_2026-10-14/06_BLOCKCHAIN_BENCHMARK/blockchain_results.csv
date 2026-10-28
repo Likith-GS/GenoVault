@@ -1,0 +1,7 @@
+operation,status,reason
+registerFile,BLOCKED,"Requires funded Sepolia wallet and live RPC endpoint"
+requestAccess,BLOCKED,"Requires funded Sepolia wallet and live RPC endpoint"
+approveAccess,BLOCKED,"Requires funded Sepolia wallet and live RPC endpoint"
+rejectAccess,BLOCKED,"Requires funded Sepolia wallet and live RPC endpoint"
+revokeAccess,BLOCKED,"Requires funded Sepolia wallet and live RPC endpoint"
+verifyFileHashOnChain,BLOCKED,"Requires live Sepolia RPC endpoint"

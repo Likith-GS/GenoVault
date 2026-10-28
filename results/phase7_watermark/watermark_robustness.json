@@ -1,0 +1,287 @@
+{
+  "experiment": "watermark_robustness",
+  "version": "v2_fixed",
+  "runAt": "2026-10-14T17:17:24.095Z",
+  "fixNote": "Uses real embedWatermark() output. detectWatermarkInCandidate() called with the identical WatermarkRecord used in embed(). No stub payload construction.",
+  "pipeline": "generateWatermarkSeed → buildWatermarkRecord → embedWatermark(.fastq) → perturbFn → normalizeFASTQ → detectWatermarkInCandidate",
+  "nRuns": 5,
+  "syntheticReads": {
+    "count": 500,
+    "readLength": 150,
+    "dataSource": "SYNTHETIC — crypto.randomBytes() only"
+  },
+  "detectionThreshold": "verified === true OR matchScore >= 0.85",
+  "perturbations": [
+    {
+      "label": "P1_lossless_roundtrip",
+      "nRuns": 5,
+      "detected": 5,
+      "notDetected": 0,
+      "detectionRate": "100.0%",
+      "matchScoreStats": {
+        "n": 5,
+        "mean": 1,
+        "median": 1,
+        "sd": 0,
+        "min": 1,
+        "max": 1,
+        "unit": "score"
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 2,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 3,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 4,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 5,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "label": "P2_quality_jitter_plus_minus_1",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "matchScoreStats": {
+        "n": 5,
+        "mean": 0,
+        "median": 0,
+        "sd": 0,
+        "min": 0,
+        "max": 0,
+        "unit": "score"
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0,
+          "confidence": "LOW",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "label": "P3_5pct_read_substitution",
+      "nRuns": 5,
+      "detected": 5,
+      "notDetected": 0,
+      "detectionRate": "100.0%",
+      "matchScoreStats": {
+        "n": 5,
+        "mean": 1,
+        "median": 1,
+        "sd": 0,
+        "min": 1,
+        "max": 1,
+        "unit": "score"
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 2,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 3,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 4,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        },
+        {
+          "run": 5,
+          "detected": true,
+          "matchScore": 1,
+          "confidence": "CONFIRMED",
+          "verified": true
+        }
+      ]
+    },
+    {
+      "label": "P4_10pct_read_truncation",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "matchScoreStats": {
+        "n": 5,
+        "mean": 0.609,
+        "median": 0.625,
+        "sd": 0.054,
+        "min": 0.5313,
+        "max": 0.6719,
+        "unit": "score"
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0.6563,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0.625,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0.5313,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0.6719,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0.5625,
+          "confidence": "LOW",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "label": "P5_quality_normalization",
+      "nRuns": 5,
+      "detected": 0,
+      "notDetected": 5,
+      "detectionRate": "0.0%",
+      "matchScoreStats": {
+        "n": 5,
+        "mean": 0.509,
+        "median": 0.484,
+        "sd": 0.049,
+        "min": 0.4531,
+        "max": 0.5938,
+        "unit": "score"
+      },
+      "runs": [
+        {
+          "run": 1,
+          "detected": false,
+          "matchScore": 0.4844,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 2,
+          "detected": false,
+          "matchScore": 0.4531,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 3,
+          "detected": false,
+          "matchScore": 0.4844,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 4,
+          "detected": false,
+          "matchScore": 0.5938,
+          "confidence": "LOW",
+          "verified": false
+        },
+        {
+          "run": 5,
+          "detected": false,
+          "matchScore": 0.5313,
+          "confidence": "LOW",
+          "verified": false
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Synthetic FASTQ buffers only — no real patient data.",
+    "P1 (lossless) MUST show 100% detection — this is the baseline correctness check.",
+    "P2–P5 show robustness under common post-sequencing transformations.",
+    "WATERMARK_SECRET must be set in .env for this harness to run."
+  ]
+}

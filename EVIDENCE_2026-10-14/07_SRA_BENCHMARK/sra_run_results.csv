@@ -1,0 +1,2 @@
+status,reason
+BLOCKED,"No GenoVault-watermarked file exists in a public NCBI SRA accession. The system watermarks controlled downloads, not public SRA submissions."

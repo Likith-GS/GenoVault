@@ -33,19 +33,30 @@ const WM_TAG_VCF = "##GENOVAULT_WM=";       // VCF meta-info line prefix
 /**
  * embedBAM(buffer, watermarkRecord)
  * Inserts @CO watermark tag into the SAM/BAM header lines.
- * Operates on UTF-8 text representation (SAM format).
+ *
+ * BAM files are binary — only the header is text (SAM format).
+ * We slice the first HEADER_SLICE bytes for text parsing, embed
+ * the tag into the header, then re-join with the untouched binary body.
+ * This avoids the Node.js string-length crash on large BAM files.
  *
  * @param {Buffer} buffer
  * @param {Object} watermarkRecord  – must include watermarkId
  * @returns {{ watermarkedBuffer: Buffer }}
  */
+const HEADER_SLICE = 65536; // 64 KB — far larger than any real BAM header
+
 function embedBAM(buffer, watermarkRecord) {
   // WEAK_WATERMARK: metadata-only; can be stripped by samtools view -H
-  const text  = buffer.toString("utf8");
-  const lines = text.split(/\r?\n/);
-  const tag   = `@CO\t${WM_TAG_BAM}${watermarkRecord.watermarkId}`;
 
-  // Insert after last @HD or @SQ header line, before @RG or first read
+  // Only convert the header region to text — do NOT toString() the whole file
+  const headerBuf  = buffer.slice(0, Math.min(HEADER_SLICE, buffer.length));
+  const bodyBuf    = buffer.slice(Math.min(HEADER_SLICE, buffer.length));
+
+  const headerText = headerBuf.toString("latin1"); // latin1 preserves bytes 1-to-1
+  const lines      = headerText.split(/\r?\n/);
+  const tag        = `@CO\t${WM_TAG_BAM}${watermarkRecord.watermarkId}`;
+
+  // Insert after last @HD or @SQ header line, before first read
   let insertIdx = 0;
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].startsWith("@HD") || lines[i].startsWith("@SQ")) {
@@ -54,29 +65,32 @@ function embedBAM(buffer, watermarkRecord) {
   }
 
   lines.splice(insertIdx, 0, tag);
-  return { watermarkedBuffer: Buffer.from(lines.join("\n"), "utf8") };
+  const newHeaderBuf = Buffer.from(lines.join("\n"), "latin1");
+  return { watermarkedBuffer: Buffer.concat([newHeaderBuf, bodyBuf]) };
 }
 
 /**
  * detectBAM(buffer, watermarkRecord)
  * Scans SAM header for the watermark CO tag and verifies watermarkId.
+ * Only scans the first HEADER_SLICE bytes to avoid OOM on large BAM files.
  *
  * @param {Buffer} buffer
  * @param {Object} watermarkRecord
  * @returns {{ verified: boolean, matchScore: number, integrity: number }}
  */
 function detectBAM(buffer, watermarkRecord) {
-  // WEAK_WATERMARK: detection only checks if the tag is present
-  const text = buffer.toString("utf8");
-  const tag  = `${WM_TAG_BAM}${watermarkRecord.watermarkId}`;
+  // WEAK_WATERMARK: detection only checks if the tag is present in the header
+  const headerText = buffer.slice(0, Math.min(HEADER_SLICE, buffer.length)).toString("latin1");
+  const tag        = `${WM_TAG_BAM}${watermarkRecord.watermarkId}`;
 
-  const found = text.includes(tag);
+  const found = headerText.includes(tag);
   return {
     verified:   found,
     matchScore: found ? 1 : 0,
     integrity:  found ? 1 : 0,
   };
 }
+
 
 // ─────────────────────────────────────────────────────────────────
 // VCF helpers

@@ -1,0 +1,91 @@
+{
+  "experiment": "blockchain_latency_local",
+  "runAt": "2026-10-14T17:21:24.324Z",
+  "nRuns": 5,
+  "mode": "LOCAL_OFFLINE_PLUS_OPTIONAL_READ",
+  "network": "Ethereum Sepolia (chainId 11155111)",
+  "measuredLocally": {
+    "payloadPreparation": {
+      "sha256FilePrepMs": {
+        "n": 5,
+        "mean": 1.587,
+        "median": 1.244,
+        "sd": 0.867,
+        "min": 0.8404,
+        "max": 3.1785,
+        "unit": "ms"
+      },
+      "hmacOwnerHashMs": {
+        "n": 5,
+        "mean": 0.302,
+        "median": 0.104,
+        "sd": 0.427,
+        "min": 0.0525,
+        "max": 1.154,
+        "unit": "ms"
+      },
+      "nonceGenMs": {
+        "n": 5,
+        "mean": 0.308,
+        "median": 0.034,
+        "sd": 0.538,
+        "min": 0.0252,
+        "max": 1.3838,
+        "unit": "ms"
+      }
+    },
+    "abiEncoding": {
+      "abiEncodeMs": {
+        "n": 5,
+        "mean": 3.105,
+        "median": 2.356,
+        "sd": 2.696,
+        "min": 0.496,
+        "max": 8.2865,
+        "unit": "ms"
+      }
+    },
+    "offlineSigning": {
+      "offlineSignMs": {
+        "n": 5,
+        "mean": 4.199,
+        "median": 3.114,
+        "sd": 2.797,
+        "min": 1.9013,
+        "max": 9.6521,
+        "unit": "ms"
+      }
+    }
+  },
+  "sepoliaReadLatency": {
+    "status": "PARTIAL",
+    "nRuns": 5,
+    "nSuccessful": 0,
+    "readMs": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "stats": null
+  },
+  "notMeasured": [
+    "registerFile() mining latency — requires funded Sepolia wallet + live RPC",
+    "gas_used from tx receipt — requires real transaction",
+    "On-chain confirmation time — depends on network congestion",
+    "requestAccess / approveAccess / revokeAccess latency — same constraint"
+  ],
+  "howToRunLive": [
+    "1. Ensure PRIVATE_KEY is set in .env (funded Sepolia wallet)",
+    "2. Ensure BLOCKCHAIN_RPC_URL (Alchemy/Infura Sepolia) is set in .env",
+    "3. Ensure BLOCKCHAIN_CONTRACT_ADDRESS is set in .env",
+    "4. Get user approval to submit live transactions",
+    "5. Run: node backend/experiments/blockchainBenchmark.js"
+  ],
+  "notes": [
+    "Signing uses a disposable random wallet (NOT PRIVATE_KEY) — no real keys used.",
+    "Payload is synthetic SHA-256/HMAC hashes — no real genomic data.",
+    "eth_call for read functions costs zero gas and requires no wallet."
+  ]
+}

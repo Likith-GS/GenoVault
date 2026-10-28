@@ -1,0 +1,55 @@
+suite,test_id,test_name,status,duration_ms
+"encryption.test.js","ENC-01","V2 encrypt → decrypt round-trip succeeds","PASS",49
+"encryption.test.js","ENC-02","V2: modified ciphertext → MAC verification throws","PASS",181
+"encryption.test.js","ENC-03","V2: modified IV → MAC verification throws","PASS",1
+"encryption.test.js","ENC-04","V2: completely wrong MAC hex → throws","PASS",2
+"encryption.test.js","ENC-05","V2: incorrect MAC is rejected — constant-time comparison via timingSafeEqual","PASS",1
+"encryption.test.js","ENC-06","V1 legacy decryptBuffer still decrypts V1 ciphertext correctly","PASS",1
+"encryption.test.js","ENC-07","V1 file without MAC string → decryptBufferV2 throws (missing expectedMacHex)","PASS",101
+"encryption.test.js","ENC-08","encryptBufferV2 returns ciphertext and a 64-char hex MAC (encryptionMac field)","PASS",25
+"identity.test.js","ID-01","Same ORCID + same secret → same identifier (HMAC determinism)","PASS",4
+"identity.test.js","ID-02","Different ORCID → different identifier","PASS",1
+"identity.test.js","ID-03","Same ORCID + different secret → different identifier","PASS",1
+"identity.test.js","ID-04","Identifier is a valid bytes32 (0x-prefixed, 66 chars, lowercase hex)","PASS",4
+"identity.test.js","ID-05","Missing RESEARCHER_ID_HMAC_SECRET → throws (fail-safe)","PASS",55
+"identity.test.js","ID-06","Raw ORCID string is not present in the returned identifier","PASS",1
+"identity.test.js","ID-07","V1 keccak256 and V2 HMAC produce different identifiers for the same ORCID","PASS",98
+"integrity.test.js","INT-01","All layers PASS → overall = SECURE","PASS",25
+"integrity.test.js","INT-02","SHA-256 FAIL with INTEGRITY_VIOLATION → overall = INTEGRITY_VIOLATION","PASS",3
+"integrity.test.js","INT-03","Azure FAIL → PRIMARY_STORAGE_UNAVAILABLE (not INTEGRITY_VIOLATION)","PASS",3
+"integrity.test.js","INT-04","IPFS PENDING + all others PASS → overall = PENDING (not a failure)","PASS",246
+"integrity.test.js","INT-05","IPFS FAIL with BACKUP_UNAVAILABLE → overall = BACKUP_UNAVAILABLE","PASS",2
+"integrity.test.js","INT-06","Blockchain FAIL with VERIFICATION_UNAVAILABLE → overall = VERIFICATION_UNAVAILABLE","PASS",1
+"integrity.test.js","INT-07","AES FAIL with KEY_OR_DECRYPTION_FAILURE → overall = KEY_OR_DECRYPTION_FAILURE","PASS",1
+"integrity.test.js","INT-08","Each layer result has required fields: status, category, layer, timestamp","PASS",4
+"integrity.test.js","INT-09","Simultaneous INTEGRITY_VIOLATION + KEY_OR_DECRYPTION_FAILURE → INTEGRITY_VIOLATION wins","PASS",1
+"integrity.test.js","INT-10","IPFS PENDING + INTEGRITY_VIOLATION → INTEGRITY_VIOLATION (not PENDING)","PASS",1
+"watermark.test.js","WM-01","normalizeFASTQ parses correct number of reads","PASS",85
+"watermark.test.js","WM-02","normalizeFASTQ read structure has correct fields","PASS",178
+"watermark.test.js","WM-03","embed() returns a watermarkedBuffer","PASS",127
+"watermark.test.js","WM-04","Watermarked buffer differs from original","PASS",63
+"watermark.test.js","WM-05","Watermarked FASTQ has same number of lines as original","PASS",56
+"watermark.test.js","WM-06","Watermark is detected in watermarked output (verified=true)","PASS",66
+"watermark.test.js","WM-07","Watermark detection fails for a different watermark record","PASS",66
+"watermark.test.js","WM-08","Detection on original (non-watermarked) buffer returns verified=false","PASS",67
+"watermark.test.js","WM-09","watermarkCommitment = SHA-256(watermarkPayload)","PASS",1
+"watermark.test.js","WM-10","generateWatermarkSeed produces unique seeds for different inputs","PASS",0
+"watermark.test.js","WM-11","Same inputs produce same watermarkSeed (HMAC determinism)","PASS",1
+"watermark.test.js","WM-12","Different nonces produce different seeds (unique watermarks)","PASS",6
+"watermark.test.js","WM-13","detectWatermarkInCandidate accepts pre-normalized reads array","PASS",61
+"watermark.test.js","WM-14","Sequence data is unchanged after watermark embedding","PASS",75
+"watermark.test.js","WM-15","20 concurrent embeddings produce 20 distinct, independently-verifiable watermarks","PASS",360
+"watermark.test.js","WM-16","Missing WATERMARK_SECRET throws during seed generation","PASS",34
+"watermark.test.js","WM-17","embedWatermark throws for unsupported file extension","PASS",1
+"watermark.test.js","WM-18","metadataEmbedder inserts GENOVAULT_WM CO tag in BAM/SAM","PASS",1
+"watermark.test.js","WM-19","metadataEmbedder inserts ##GENOVAULT_WM line in VCF","PASS",1
+"watermark.test.js","WM-20","metadataEmbedder detects correct watermarkId in BAM","PASS",0
+"watermark.test.js","WM-21","metadataEmbedder returns verified=false for wrong watermarkId","PASS",1
+"watermark.test.js","WM-22","metadataEmbedder throws for unsupported format","PASS",5
+"watermark.test.js","WM-23","detectWatermarkInCandidate throws if non-Buffer passed for METADATA_V1","PASS",2
+"watermark.test.js","WM-24","Small FASTQ (50 reads) still produces a verifiable watermark","PASS",32
+"watermark.test.js","WM-25","computeWatermarkedFileHash equals SHA-256(watermarkedBuffer)","PASS",28
+"watermark.test.js","WM-26","generateWatermarkId returns WM-XXXXXXXX format","PASS",3
+"watermark.test.js","WM-27","Commitment is consistent: same seed always produces same commitment","PASS",0
+"watermark.test.js","WM-28","Modified payload produces a different commitment — detection rejects it","PASS",57
+"watermark.test.js","WM-29","Seed, payload, and commitment are three distinct cryptographic values","PASS",3

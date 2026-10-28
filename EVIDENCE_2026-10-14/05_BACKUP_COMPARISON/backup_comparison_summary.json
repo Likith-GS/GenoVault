@@ -1,0 +1,20 @@
+{
+  "experiment": "azure_vs_filebase_ipfs_backup_comparison",
+  "status": "BLOCKED",
+  "executedAt": "2026-10-14T16:43:00Z",
+  "reason": "Requires a file that has been uploaded through the full GenoVault pipeline (plaintext → Azure encrypted blob → IPFS Filebase backup). No such test file is available with confirmed credentials for a non-sensitive test object.",
+  "prerequisites": [
+    "AZURE_STORAGE_CONNECTION_STRING with read access to a test blob container",
+    "FILEBASE_ACCESS_KEY_ID and FILEBASE_SECRET_ACCESS_KEY with read access to the backup bucket",
+    "A non-sensitive test file identifier (fileId) registered in both stores",
+    "SHA-256 hash of the registered ciphertext recorded at upload time"
+  ],
+  "whatWouldBeMeasured": [
+    "SHA-256(Azure encrypted object)",
+    "SHA-256(Filebase/IPFS encrypted object)",
+    "Size match",
+    "Hash equality (byte-equivalent backup confirmation)"
+  ],
+  "scriptAvailable": "backend/experiments/azureIpfsComparison.js",
+  "note": "A matching IPFS CID is NOT sufficient. Direct byte-level SHA-256 comparison is required per Mandatory Rule 5."
+}
