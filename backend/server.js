@@ -18,6 +18,7 @@ const blockchainRoutes  = require("./routes/blockchainRoutes");
 const auditRoutes       = require("./routes/auditRoutes");
 const integrityRoutes   = require("./routes/integrityRoutes");
 const provenanceRoutes  = require("./routes/provenanceRoutes");  // Provenance & Misuse Detection
+const watermarkTestRoutes = require("./testing/routes/watermarkTestRoutes"); // Watermark Testing (demo)
 
 
 // ─────────────────────────────────────────────────────────────
@@ -159,6 +160,7 @@ app.use("/api/blockchain", blockchainRoutes); // Ethereum integration
 app.use("/api/audit",      auditRoutes);      // Unified blockchain audit trail
 app.use("/api/integrity",  integrityRoutes);  // Unit 6 – file integrity & dashboard
 app.use("/api/provenance", provenanceRoutes); // Provenance & Misuse Detection Engine
+app.use("/api/testing",    watermarkTestRoutes); // Watermark Testing — demo only, read-only
 
 // Health check — live system status for the Vault Status widget
 app.get("/api/health", async (req, res) => {

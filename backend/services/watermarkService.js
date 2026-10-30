@@ -279,6 +279,7 @@ function detectWatermarkInCandidate(candidateInput, watermarkRecord) {
  * @param {string} opts.fileExt            – ".fastq" | ".bam" | ".vcf"
  * @param {number} opts.fileSize
  * @param {string} opts.originalFileHash
+ * @param {string} [opts.originalFileName] – snapshot of file name; survives file deletion
  * @returns {Object}  ready for WatermarkRegistry.create()
  */
 function buildWatermarkRecord(opts) {
@@ -296,6 +297,7 @@ function buildWatermarkRecord(opts) {
     watermarkId:              opts.watermarkId,
     downloadId:               opts.downloadId,
     fileId:                   opts.fileId,
+    originalFileName:         opts.originalFileName ?? null,  // snapshot — survives file deletion
     ownerId:                  opts.ownerId,
     researcherId:             opts.researcherId,
     accessRequestId:          opts.accessRequestId,

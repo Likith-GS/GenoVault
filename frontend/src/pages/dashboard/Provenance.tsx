@@ -31,6 +31,7 @@ interface RecentDownload {
   fileFormat:       string;
   blockchainStatus: string;
   createdAt:        string;
+  originalFileName: string | null;
   fileId:      { originalName: string; extension: string } | null;
   researcherId:{ name: string; email: string } | null;
 }
@@ -280,7 +281,7 @@ export default function Provenance() {
                   }`} />
                   <div>
                     <p className="text-sm text-white font-medium">
-                      {dl.fileId?.originalName ?? "Unknown file"}
+                      {dl.fileId?.originalName ?? dl.originalFileName ?? "Unknown file"}
                     </p>
                     <p className="text-xs text-slate-400">
                       {dl.researcherId?.name ?? "Unknown"} · {dl.watermarkId}

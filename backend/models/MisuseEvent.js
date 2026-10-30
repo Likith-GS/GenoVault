@@ -53,6 +53,14 @@ const misuseEventSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Snapshot of the file name at the time the event was created.
+    // Persists even if the GenomicFile document is later deleted so
+    // the UI never has to show "Unknown file".
+    originalFileName: {
+      type:    String,
+      default: null,
+    },
+
     ownerId: {
       type:  mongoose.Schema.Types.ObjectId,
       ref:   "User",

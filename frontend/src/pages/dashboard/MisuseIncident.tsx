@@ -35,6 +35,7 @@ interface MisuseEvent {
   resolutionNotes:     string | null;
   resolvedAt:          string | null;
   fileId:       { originalName: string; extension: string } | null;
+  originalFileName: string | null;
   researcherId: { name: string; email: string; institution: string } | null;
 }
 
@@ -199,7 +200,7 @@ export default function MisuseIncident() {
     <div className="space-y-6">
       <PageHeader
         title="Misuse Incident"
-        description={`Event ID: ${event.eventId}`}
+        description={`Event ID: ${event.eventId} · File: ${event.fileId?.originalName ?? event.originalFileName ?? "Unknown file"}`}
         icon={<meta.Icon className={`w-6 h-6 ${meta.color}`} />}
         action={
           <div className="flex gap-3">

@@ -706,7 +706,8 @@ const downloadFile = async (req, res) => {
     const watermarkRecord = wmService.buildWatermarkRecord({
       watermarkId,
       downloadId,
-      fileId:          String(file._id),
+      fileId:           String(file._id),
+      originalFileName: file.originalName ?? null,   // snapshot — survives file deletion
       ownerId,
       researcherId:    String(researcherId),
       accessRequestId: String(request._id),

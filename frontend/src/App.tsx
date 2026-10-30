@@ -19,6 +19,7 @@ import Verification from "./pages/dashboard/Verification.tsx";
 import Provenance from "./pages/dashboard/Provenance.tsx";
 import MisuseEvents from "./pages/dashboard/MisuseEvents.tsx";
 import MisuseIncident from "./pages/dashboard/MisuseIncident.tsx";
+import WatermarkTesting from "./pages/dashboard/WatermarkTesting.tsx";
 
 import { ResearcherLayout } from "@/components/researcher/ResearcherLayout";
 import DashboardOverview from "./pages/researcher/DashboardOverview";
@@ -56,6 +57,7 @@ const App = () => (
                 <Route path="provenance" element={<Provenance />} />
                 <Route path="misuse" element={<MisuseEvents />} />
                 <Route path="misuse/:eventId" element={<MisuseIncident />} />
+                <Route path="watermark-testing" element={<WatermarkTesting />} />
               </Route>
 
               <Route path="/researcher" element={<ResearcherLayout />}>

@@ -66,6 +66,13 @@ const watermarkRegistrySchema = new mongoose.Schema(
       required: true,
     },
 
+    // Snapshot of the file's original name at the time of download.
+    // Persists even after the GenomicFile document is deleted.
+    originalFileName: {
+      type:    String,
+      default: null,
+    },
+
     // ── Cryptographic watermark fields ───────────────────────────
 
     /**

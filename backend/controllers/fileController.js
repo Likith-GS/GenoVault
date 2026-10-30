@@ -509,10 +509,42 @@ const deleteFile = async (req, res) => {
       console.warn(`[IPFS] ⚠️ Unpin skipped:`, ipfsErr.message);
     }
 
-    // 3. Delete from MongoDB
+    // 3. Delete from MongoDB (GenomicFile document)
     await GenomicFile.findByIdAndDelete(id);
 
-    // 4. Delete AES key from Key Vault (best-effort)
+    // 4. Cascade-delete: MisuseEvents and WatermarkRegistry for this file.
+    //    Uses two passes:
+    //      a) by fileId (ObjectId match — the normal case)
+    //      b) by watermarkId set — catches events where fileId was stored as null
+    //         but still belong to this file's watermark records.
+    try {
+      const MisuseEvent        = require("../models/MisuseEvent");
+      const WatermarkRegistry  = require("../models/WatermarkRegistry");
+
+      // Pass (a): collect watermarkIds for this file before deleting registry
+      const wmRecords = await WatermarkRegistry.find({ fileId: id }, { watermarkId: 1 }).lean();
+      const watermarkIds = wmRecords.map(r => r.watermarkId);
+
+      // Pass (b): delete events by fileId OR watermarkId
+      const eventFilter = watermarkIds.length
+        ? { $or: [{ fileId: id }, { watermarkId: { $in: watermarkIds } }] }
+        : { fileId: id };
+
+      const [eventsDeleted, wmDeleted] = await Promise.all([
+        MisuseEvent.deleteMany(eventFilter),
+        WatermarkRegistry.deleteMany({ fileId: id }),
+      ]);
+
+      console.log(
+        `[deleteFile] 🧹 Cascade: removed ${eventsDeleted.deletedCount} misuse events ` +
+        `and ${wmDeleted.deletedCount} watermark records for file ${id}`
+      );
+    } catch (cascadeErr) {
+      console.warn(`[deleteFile] ⚠️ Cascade delete warning:`, cascadeErr.message);
+      errors.push(`Cascade: ${cascadeErr.message}`);
+    }
+
+    // 5. Delete AES key from Key Vault (best-effort)
     try {
       await deleteEncryptionKey(id);
     } catch (kvErr) {

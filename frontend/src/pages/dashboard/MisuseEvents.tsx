@@ -22,6 +22,7 @@ interface MisuseEvent {
   status:              string;
   source:              string;
   sourceRecordId:      string | null;
+  originalFileName:    string | null;
   watermarkMatchScore: number | null;
   overallConfidence:   string | null;
   detectedAt:          string;
@@ -175,7 +176,7 @@ export default function MisuseEvents() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3">
                       <p className="text-sm text-white font-medium truncate">
-                        {ev.fileId?.originalName ?? "Unknown file"}
+                        {ev.fileId?.originalName ?? ev.originalFileName ?? "Unknown file"}
                       </p>
                       <Badge
                         variant="outline"
